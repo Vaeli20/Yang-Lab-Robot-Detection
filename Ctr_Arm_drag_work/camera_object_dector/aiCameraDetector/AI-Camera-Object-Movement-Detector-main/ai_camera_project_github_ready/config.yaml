@@ -1,0 +1,61 @@
+# Detection and motion configuration
+# normal version (Fastest) -- Simple but less accurate
+model: yolov8n.pt
+conf_threshold: 0.30
+iou_threshold: 0.45
+imgsz: 416
+frame_scale: 0.80
+motion_history: 5
+motion_area_threshold: 500
+contrast_alpha: 1.10
+brightness_beta: -10
+saturation_scale: 1.20
+
+# number of frames to accumulate for motion smoothing# default model name used by ultralytics; will download if not present
+#Small version (Best Balance)
+#model: yolov8s.pt
+#conf_threshold: 0.40
+#iou_threshold: 0.45
+#imgsz: 480
+#frame_scale: 0.75
+#motion_history: 4
+#motion_area_threshold: 600
+#contrast_alpha: 1.15
+#brightness_beta: -15
+#saturation_scale: 1.25
+
+# Medium version (Higher Accuracy)
+#model: yolov8m.pt
+#conf_threshold: 0.50
+#iou_threshold: 0.40
+#imgsz: 480
+#frame_scale: 0.70
+#motion_history: 3
+#motion_area_threshold: 700
+#contrast_alpha: 1.20
+#brightness_beta: -20
+#saturation_scale: 1.30
+
+# Large version (Highest Accuracy)
+#model: yolov8l.pt
+#conf_threshold: 0.55
+#iou_threshold: 0.35
+#imgsz: 416
+#frame_scale: 0.65
+#motion_history: 2
+#motion_area_threshold: 900
+#contrast_alpha: 1.25
+#brightness_beta: -25
+#saturation_scale: 1.35
+
+# X version (Extremely Heavy) -- Not Recommended for most use cases
+#model: yolov8x.pt
+#conf_threshold: 0.60
+#iou_threshold: 0.30
+#imgsz: 384
+#frame_scale: 0.60
+#motion_history: 1
+#motion_area_threshold: 1200
+#contrast_alpha: 1.30
+#brightness_beta: -30
+#saturation_scale: 1.40

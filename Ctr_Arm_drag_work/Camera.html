@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Camera Studio</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;padding:32px 18px;background:#101311;color:#edf1e9;font:14px/1.45 system-ui,sans-serif}.app{max-width:1040px;margin:auto}header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}.brand{display:flex;align-items:center;gap:12px}h1{font-size:20px;margin:0}.muted{color:#929b90;font-size:12px}.icon{width:40px;height:40px;border-radius:12px;background:#273b29;color:#a8ed7c;display:grid;place-items:center}.status{display:flex;align-items:center;gap:8px;color:#bac2b8;font-size:12px}.dot{width:8px;height:8px;border-radius:50%;background:#687166}.dot.live{background:#a8ed7c;box-shadow:0 0 10px #a8ed7c88}.grid{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(270px,.85fr);gap:16px}.card{background:#191d19;border:1px solid #2c332b;border-radius:16px;overflow:hidden}.preview{position:relative;aspect-ratio:16/10;min-height:330px;background:#0b0e0c;display:grid;place-items:center;color:#818b80;text-align:center}.preview svg{display:block;margin:0 auto 12px;color:#657061}video{display:none;position:absolute;inset:0;width:100%;height:100%;object-fit:cover}.preview.running video{display:block}.preview.running .placeholder{display:none}.badge{position:absolute;top:14px;left:14px;background:#111710d9;padding:6px 9px;border-radius:7px;font-size:10px;letter-spacing:.08em;color:#dae0d6}.badge .dot{display:inline-block;width:6px;height:6px;margin-right:6px}.resolution{position:absolute;bottom:14px;left:15px;color:#e2e7df;font-size:11px;text-shadow:0 1px 5px #000}.controls{padding:19px}.title{font-size:13px;margin:0 0 14px}.field{margin-bottom:18px}label{display:block;color:#a4ada1;font-size:12px;margin-bottom:7px}select{width:100%;padding:10px;background:#111511;border:1px solid #384036;border-radius:8px;color:#edf1e9;font:inherit}button{border:1px solid #384036;border-radius:9px;background:#242a23;color:#edf1e9;min-height:40px;padding:8px 12px;font:inherit;cursor:pointer}button:hover:not(:disabled){background:#30392d}button:disabled{opacity:.45;cursor:not-allowed}.actions{display:grid;grid-template-columns:1fr 1fr;gap:9px}.primary{grid-column:1/-1;background:#a8ed7c;color:#172014;border-color:#a8ed7c;font-weight:700}.danger{color:#f0a6a0}.settings{border-top:1px solid #2c332b;margin-top:17px;padding-top:16px}.row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;color:#bdc5b9}input{accent-color:#a8ed7c;width:16px;height:16px}.note{color:#818b80;font-size:11px;margin:12px 0 0}@media(max-width:700px){body{padding:22px 13px}.grid{grid-template-columns:1fr}.preview{min-height:240px}header{align-items:flex-start}}
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header>
+      <div class="brand"><div class="icon" aria-hidden="true">◉</div><div><h1>Camera Studio</h1><div class="muted">Webcam control panel</div></div></div>
+      <div class="status"><span class="dot" id="statusDot"></span><span id="statusText">Camera off</span></div>
+    </header>
+    <div class="grid">
+      <section class="card preview" id="preview" aria-label="Camera preview">
+        <video id="video" autoplay playsinline muted></video>
+        <div class="placeholder"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="m16 10 5-3v10l-5-3z"/></svg>Camera preview will appear here</div>
+        <div class="badge"><span class="dot" id="previewDot"></span><span id="previewState">STANDBY</span></div>
+        <div class="resolution" id="resolution">—</div>
+      </section>
+      <aside class="card controls">
+        <h2 class="title">Camera source</h2>
+        <div class="field"><label for="device">Select device</label><select id="device"><option value="">Default camera</option></select></div>
+        <div class="actions"><button class="primary" id="start">Start camera</button><button id="snapshot" disabled>Take snapshot</button><button class="danger" id="stop" disabled>Stop camera</button></div>
+        <div class="settings"><h2 class="title">Preview settings</h2>
+          <div class="row"><label for="mirror">Mirror preview</label><input id="mirror" type="checkbox" checked></div>
+          <div class="row"><label for="hd">HD quality</label><input id="hd" type="checkbox" checked></div>
+          <p class="note">Camera access is requested when you start. Video stays on this device.</p>
+        </div>
+      </aside>
+    </div>
+  </main>
+  <script>
+    const video=document.querySelector('#video'), preview=document.querySelector('#preview'), device=document.querySelector('#device');
+    let stream=null;
+    async function refreshDevices(){
+      if(!navigator.mediaDevices?.enumerateDevices)return;
+      try{const old=device.value, cams=(await navigator.mediaDevices.enumerateDevices()).filter(x=>x.kind==='videoinput');device.replaceChildren(new Option('Default camera',''));cams.forEach((c,i)=>device.add(new Option(c.label||`Camera ${i+1}`,c.deviceId)));if([...device.options].some(o=>o.value===old))device.value=old;}catch{}
+    }
+    function update(running){
+      preview.classList.toggle('running',running);
+      document.querySelector('#statusDot').classList.toggle('live',running);
+      document.querySelector('#previewDot').classList.toggle('live',running);
+      document.querySelector('#statusText').textContent=running?'Camera live':'Camera off';
+      document.querySelector('#previewState').textContent=running?'LIVE':'STANDBY';
+      document.querySelector('#resolution').textContent=running?`${video.videoWidth} × ${video.videoHeight}`:'—';
+      document.querySelector('#start').disabled=running;
+      document.querySelector('#stop').disabled=!running;
+      document.querySelector('#snapshot').disabled=!running;
+    }
+    async function startCamera(){
+      const button=document.querySelector('#start');button.disabled=true;
+      try{
+        if(!navigator.mediaDevices?.getUserMedia)throw new Error('Camera access is not supported by this browser.');
+        stream=await navigator.mediaDevices.getUserMedia({video:{deviceId:device.value?{exact:device.value}:undefined,width:{ideal:document.querySelector('#hd').checked?1280:640},height:{ideal:document.querySelector('#hd').checked?720:480}},audio:false});
+        video.srcObject=stream;await video.play();update(true);await refreshDevices();
+      }catch(error){button.disabled=false;alert(error.message==='Camera access is not supported by this browser.'?error.message:'Unable to start camera. Check browser permission and that the device is available.');}
+    }
+    function stopCamera(){if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;video.srcObject=null;update(false);}
+    document.querySelector('#start').addEventListener('click',startCamera);
+    document.querySelector('#stop').addEventListener('click',stopCamera);
+    device.addEventListener('change',()=>{if(stream){stopCamera();startCamera();}});
+    document.querySelector('#mirror').addEventListener('change',e=>video.style.transform=e.target.checked?'scaleX(-1)':'');
+    document.querySelector('#snapshot').addEventListener('click',()=>{if(!video.videoWidth)return;const canvas=document.createElement('canvas');canvas.width=video.videoWidth;canvas.height=video.videoHeight;canvas.getContext('2d').drawImage(video,0,0);const a=document.createElement('a');a.download='camera-snapshot.png';a.href=canvas.toDataURL('image/png');a.click();});
+    refreshDevices();navigator.mediaDevices?.addEventListener?.('devicechange',refreshDevices);window.addEventListener('beforeunload',()=>stream?.getTracks().forEach(t=>t.stop()));
+  </script>
+</body>
+</html>
