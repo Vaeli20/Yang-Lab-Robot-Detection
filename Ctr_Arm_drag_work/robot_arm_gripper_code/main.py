@@ -1,11 +1,14 @@
+
 import os
 import sys
 from datetime import datetime
 from typing import List
 
+import torch
+
 import serial.tools.list_ports
 from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QBrush, QColor, QFont
+from PyQt5.QtGui import QBrush, QColor, QFont, QPixmap
 from PyQt5.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -31,6 +34,8 @@ from PyQt5.QtWidgets import (
 from point_io import PointAction, read_point_program_csv, save_point_program_csv
 from robot_worker import RobotWorker
 from trajectory_io import save_trajectory_csv
+from camera import CameraWork
+
 
 
 ARM_DOF = 6
@@ -137,6 +142,11 @@ ZH_TO_EN = {
     "状态: 点位示教已停止": "Status: Point teaching stopped",
     "状态: 点位播放中...": "Status: Point playback running...",
     "状态: 点位播放完成": "Status: Point playback complete",
+    "视觉颜色识别": "Color Detection", # Not translating
+    "AI 物体与颜色检测器": "AI Object and Color Detector",
+    "关闭摄像头": "Camera Off",
+    "打开摄像头": "Camera On",
+    "开启摄像头检测": "Camera detection started",
 }
 
 EN_TO_ZH = {v: k for k, v in ZH_TO_EN.items()}
@@ -218,6 +228,7 @@ class DragTeachWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.tabs.addTab(self.build_path_tab(), "连续轨迹示教")
         self.tabs.addTab(self.build_point_tab(), "点位示教")
+        self.tabs.addTab(self.build_camera_tab(), "视觉颜色识别") 
         main_layout.addWidget(self.tabs)
 
         main_layout.addWidget(self.build_angle_group())
@@ -504,7 +515,27 @@ class DragTeachWindow(QMainWindow):
         self.log_text.setMaximumHeight(120)
         layout.addWidget(self.log_text)
         return group
+    
+    def build_camera_tab(self):
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
 
+        group = QGroupBox("AI 物体与颜色检测器")
+        group_layout = QVBoxLayout(group)
+
+        self.camera_feed_label = QLabel("关闭摄像头")
+        self.camera_feed_label.setAlignment(Qt.AlignCenter)
+        self.camera_feed_label.setStyleSheet("background-color: black; color: white;")
+        self.camera_feed_label.setMinimumSize(640, 480)
+        group_layout.addWidget(self.camera_feed_label)
+
+        self.toggle_camera_btn = QPushButton("打开摄像头")
+        self.toggle_camera_btn.setMinimumHeight(40)
+        self.toggle_camera_btn.clicked.connect(self.toggle_camera_detector)
+        group_layout.addWidget(self.toggle_camera_btn)
+
+        layout.addWidget(group)
+        return tab
     # ==================== 基础功能 ====================
 
     def ui(self, zh_text: str) -> str:
@@ -542,6 +573,7 @@ class DragTeachWindow(QMainWindow):
         self.language_btn.setText("English" if self.lang == "zh" else "中文")
         self.tabs.setTabText(0, self.ui("连续轨迹示教"))
         self.tabs.setTabText(1, self.ui("点位示教"))
+        self.tabs.setTabText(2, self.ui("视觉颜色识别"))
         self.point_table.setHorizontalHeaderLabels(POINT_HEADERS_EN if self.lang == "en" else POINT_HEADERS_ZH)
 
         forward = ZH_TO_EN if self.lang == "en" else EN_TO_ZH
@@ -1186,6 +1218,41 @@ class DragTeachWindow(QMainWindow):
         self.set_point_edit_controls_enabled(True)
         self.highlight_point_row(-1)
 
+    # ==================== 相机检测器 ====================
+    
+    def toggle_camera_detector(self):
+        if not hasattr(self, 'camera_worker') or not self.camera_worker.isRunning():
+
+            self.camera_worker = CameraWork()
+            self.camera_worker.frame_ready.connect(self.update_camera_frame)
+            self.camera_worker.log_msg.connect(self.log)
+
+            self.camera_worker.start()
+
+            self.toggle_camera_btn.setText(self.ui("关闭摄像头"))
+            self.log(self.ui("开启摄像头检测"))
+
+        else:
+
+            try:
+
+                self.camera_worker.stop()
+
+                self.toggle_camera_btn.setText(self.ui("打开摄像头"))
+                self.camera_feed_label.setText(self.ui("关闭摄像头"))
+                self.log(self.ui("关闭摄像头"))
+
+            except Exception:
+                import traceback
+                print("[CAMERA DEBUG ERROR]", flush=True)
+                traceback.print_exc()
+            
+
+
+    def update_camera_frame(self, qt_image):
+        self.camera_feed_label.setPixmap(QPixmap.fromImage(qt_image).scaled(
+            self.camera_feed_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
+        ))
     # ==================== 公共回调 ====================
     def on_angles_updated(self, q):
         if len(q) < ARM_DOF:
@@ -1215,6 +1282,8 @@ class DragTeachWindow(QMainWindow):
     def log(self, msg):
         ts = datetime.now().strftime("%H:%M:%S")
         self.log_text.append(f"[{ts}] {msg}")
+        print(msg, flush=True)
+
 
     def closeEvent(self, event):
         if self._allow_close:
@@ -1243,10 +1312,11 @@ class DragTeachWindow(QMainWindow):
             self._allow_close = True
             self.close()
 
-
 def main():
     app = QApplication(sys.argv)
+
     window = DragTeachWindow()
+
     window.show()
     sys.exit(app.exec_())
 
