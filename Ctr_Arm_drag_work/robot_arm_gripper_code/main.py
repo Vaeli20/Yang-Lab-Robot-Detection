@@ -1233,9 +1233,7 @@ class DragTeachWindow(QMainWindow):
             self.log(self.ui("开启摄像头检测"))
 
         else:
-
             try:
-
                 self.camera_worker.stop()
 
                 self.toggle_camera_btn.setText(self.ui("打开摄像头"))
@@ -1245,9 +1243,7 @@ class DragTeachWindow(QMainWindow):
             except Exception:
                 import traceback
                 print("[CAMERA DEBUG ERROR]", flush=True)
-                traceback.print_exc()
-            
-
+                traceback.print_exc()            
 
     def update_camera_frame(self, qt_image):
         self.camera_feed_label.setPixmap(QPixmap.fromImage(qt_image).scaled(
@@ -1284,7 +1280,6 @@ class DragTeachWindow(QMainWindow):
         self.log_text.append(f"[{ts}] {msg}")
         print(msg, flush=True)
 
-
     def closeEvent(self, event):
         if self._allow_close:
             event.accept()
@@ -1319,7 +1314,6 @@ def main():
 
     window.show()
     sys.exit(app.exec_())
-
 
 if __name__ == "__main__":
     main()

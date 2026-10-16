@@ -94,7 +94,7 @@ class CameraWork(QThread):
                 # Convert frame to QImage format for PyQt
                 rgb_image = cv2.cvtColor(out, cv2.COLOR_BGR2RGB)
                 h, w, ch = rgb_image.shape
-                qt_image = QImage(rgb_image.data, w, h, ch * w, QImage.Format_RGB888)
+                qt_image = QImage(rgb_image.data, w, h, ch * w, QImage.Format_RGB888).copy()
                 self.frame_ready.emit(qt_image)
         except Exception as e:
             self.log_msg.emit(f"Camera detector error: {e}")
