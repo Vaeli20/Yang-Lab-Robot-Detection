@@ -3,8 +3,8 @@ import os
 import sys
 from datetime import datetime
 from typing import List
-
 import torch
+
 
 import serial.tools.list_ports
 from PyQt5.QtCore import Qt
@@ -541,6 +541,7 @@ class DragTeachWindow(QMainWindow):
     def ui(self, zh_text: str) -> str:
         if self.lang == "en":
             return ZH_TO_EN.get(zh_text, zh_text)
+        self.set_window_size()
         return EN_TO_ZH.get(zh_text, zh_text)
 
     def ui_status(self, text: str) -> str:
@@ -561,6 +562,7 @@ class DragTeachWindow(QMainWindow):
                 return f"Status: executing action {count_part}, estimated motion {time_part}"
             except Exception:
                 return text
+        self.set_window_size()
         return text
 
     def toggle_language(self):
@@ -1309,7 +1311,8 @@ class DragTeachWindow(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
-
+    win = QWidget()
+    win.setFixedSize(400, 300)
     window = DragTeachWindow()
 
     window.show()
