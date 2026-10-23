@@ -10,6 +10,7 @@ import serial.tools.list_ports
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QBrush, QColor, QFont, QPixmap
 from PyQt5.QtWidgets import (
+    QAbstractScrollArea,
     QApplication,
     QFileDialog,
     QComboBox,
@@ -211,10 +212,12 @@ class DragTeachWindow(QMainWindow):
     # ==================== UI 构建 ====================
     def init_ui(self):
         self.setWindowTitle("拖动示教控制器 - 夹爪力位混合版")
-        self.setGeometry(180, 80, 1180, 820)
+        self.setGeometry(300, 70, 1180, 820)
+        self.setMinimumSize(1300, 1040)
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
+
         main_layout = QVBoxLayout(central_widget)
 
         self.title_label = QLabel("机械臂拖动示教系统：J1~J6 + 夹爪G反馈/力位混合控制")
@@ -224,7 +227,7 @@ class DragTeachWindow(QMainWindow):
         main_layout.addWidget(title)
 
         main_layout.addWidget(self.build_connection_group())
-
+        
         self.tabs = QTabWidget()
         self.tabs.addTab(self.build_path_tab(), "连续轨迹示教")
         self.tabs.addTab(self.build_point_tab(), "点位示教")
@@ -368,6 +371,7 @@ class DragTeachWindow(QMainWindow):
         hint = QLabel(
             "说明：夹爪位置G从 get_current_joint_angles() 读取；夹爪动作不走 set_joint_angles，而是调用 MotorControl.control_pos_force(Motor7, G, 夹爪速度, 夹爪力度)。示教时夹爪力位混合命令参数为0。"
         )
+        hint.setWordWrap(True)
         hint.setStyleSheet("color: #555;")
         layout.addWidget(hint)
         layout.addStretch()
@@ -482,17 +486,41 @@ class DragTeachWindow(QMainWindow):
         table_layout.addLayout(file_buttons)
 
         self.point_table = QTableWidget(0, 13)
+        self.point_table.setWordWrap(True)
         self.point_table.setHorizontalHeaderLabels(POINT_HEADERS_ZH)
-        self.point_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.point_table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+
+        column_widths = [
+            75,   
+            75,   
+            75,   
+            75,   
+            75,   
+            75,  
+            75,   
+            110,   
+            220,  
+            95,   
+            140,  
+            140,  
+            85   
+        ] # Total 315   
+
+        for col, width in enumerate(column_widths):
+            self.point_table.setColumnWidth(col, width)
+        self.point_table.setSizeAdjustPolicy(QAbstractScrollArea.AdjustToContents)
         self.point_table.verticalHeader().setVisible(False)
         self.point_table.setAlternatingRowColors(True)
         self.point_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.point_table.setSelectionMode(QTableWidget.SingleSelection)
+        self.point_table.resizeRowsToContents()
+
         table_layout.addWidget(self.point_table)
 
         hint = QLabel(
             "说明：同步速度只针对J1~J6。六轴最大速度是机械臂关节速度上限，程序按J1~J6角度差自动分配速度；夹爪G不参与同步，播放时通过control_pos_force按表格里的夹爪速度和力度单独执行，默认速度5。蓝色行表示当前动作。"
         )
+        hint.setWordWrap(True)
         hint.setStyleSheet("color: #555;")
         table_layout.addWidget(hint)
         layout.addWidget(table_group)
@@ -541,7 +569,6 @@ class DragTeachWindow(QMainWindow):
     def ui(self, zh_text: str) -> str:
         if self.lang == "en":
             return ZH_TO_EN.get(zh_text, zh_text)
-        self.set_window_size()
         return EN_TO_ZH.get(zh_text, zh_text)
 
     def ui_status(self, text: str) -> str:
@@ -562,7 +589,6 @@ class DragTeachWindow(QMainWindow):
                 return f"Status: executing action {count_part}, estimated motion {time_part}"
             except Exception:
                 return text
-        self.set_window_size()
         return text
 
     def toggle_language(self):
@@ -1311,11 +1337,10 @@ class DragTeachWindow(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
-    win = QWidget()
-    win.setFixedSize(400, 300)
-    window = DragTeachWindow()
 
+    window = DragTeachWindow()
     window.show()
+
     sys.exit(app.exec_())
 
 if __name__ == "__main__":

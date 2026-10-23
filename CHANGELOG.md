@@ -27,6 +27,13 @@ EX:
   schedule cards.
 -->
 
+## Jaelynn - 10/23/2026
+### Added
+- `original_main.py` Initial main.py file from [Gitee Robot Arm](https://gitee.com/majormj/robot-arm-4340)
+### Changed
+- `main.py` modified python window size to have set min size and max size. Avoiding it going above what the screen can hold. <br> Along with fixing point header column size and having text from notes to wrap. All implemented in en or zh versions.
+
+---
 ## Jaelynn - 10/22/2026
 ### Added
 - `CHANGELOG.md` file created for initial set up for future documentation of changes made
