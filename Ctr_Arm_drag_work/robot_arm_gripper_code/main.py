@@ -1,13 +1,12 @@
-
 import os
 import sys
+import csv
 from datetime import datetime
 from typing import List
 import torch
 
-
 import serial.tools.list_ports
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QBrush, QColor, QFont, QPixmap
 from PyQt5.QtWidgets import (
     QAbstractScrollArea,
@@ -23,6 +22,7 @@ from PyQt5.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
@@ -37,15 +37,12 @@ from robot_worker import RobotWorker
 from trajectory_io import save_trajectory_csv
 from camera import CameraWork
 
-
-
 ARM_DOF = 6
 TOTAL_DOF = 7
 
-
 ZH_TO_EN = {
     "拖动示教控制器 - 夹爪力位混合版": "Drag Teaching Controller - Gripper Force-Position Mode",
-    "机械臂拖动示教系统：J1~J6 + 夹爪G反馈/力位混合控制": "Robot Drag Teaching System: J1-J6 + Gripper G Feedback / Force-Position Control",
+    "机械臂拖动示教系统：J1~J6 + 夹爪G反馈/力位混合控制": "Robot Arm Program: J1-J6 + Gripper G Feedback / F-Pos Control",
     "连续轨迹示教": "Continuous Trajectory",
     "点位示教": "Point Teaching",
     "串口连接": "Serial Connection",
@@ -100,11 +97,11 @@ ZH_TO_EN = {
     "下移": "Move Down",
     "清空": "Clear",
     "序号": "No.",
-    "G夹爪": "G Gripper",
-    "六轴最大速度(rad/s)": "Arm Max Speed (rad/s)",
-    "间隔(s)": "Pause (s)",
-    "夹爪速度": "Gripper Speed",
-    "夹爪力度": "Gripper Force",
+    "G夹爪": "G\nGripper",
+    "六轴最大速度(rad/s)": "Arm Max Speed\n(rad/s)",
+    "间隔(s)": "Pause\n(s)",
+    "夹爪速度": "Gripper\nSpeed",
+    "夹爪力度": "Gripper\nForce",
     "备注": "Note",
     "说明：同步速度只针对J1~J6。六轴最大速度是机械臂关节速度上限，程序按J1~J6角度差自动分配速度；夹爪G不参与同步，播放时通过control_pos_force按表格里的夹爪速度和力度单独执行，默认速度5。蓝色行表示当前动作。": "Note: Synchronization applies only to J1-J6. Arm max speed is the speed limit for the arm joints; the program automatically distributes speeds according to J1-J6 angle deltas. Gripper G is not synchronized with the arm; it is executed separately through control_pos_force using the gripper speed and force in the table. The blue row indicates the current action.",
     "实时关节角度": "Real-Time Joint Angles",
@@ -159,7 +156,6 @@ POINT_HEADERS_ZH = [
 
 POINT_HEADERS_EN = [ZH_TO_EN.get(x, x) for x in POINT_HEADERS_ZH]
 
-
 class DragTeachWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -206,14 +202,22 @@ class DragTeachWindow(QMainWindow):
         self.worker.finished.connect(self.on_worker_thread_finished)
         self.worker.start()
 
+        # Camera reference recording for point teaching
+        self.latest_camera_image = None
+        self.point_recording_dir = None
+        self.point_recording_csv = None
+        self.point_recording_file = None
+        self.point_recording_writer = None
+        self.point_capture_count = 0
+
         self.init_ui()
-        self.scan_serial_ports()
+        self.scan_serial_ports() 
 
     # ==================== UI 构建 ====================
     def init_ui(self):
         self.setWindowTitle("拖动示教控制器 - 夹爪力位混合版")
-        self.setGeometry(300, 70, 1180, 820)
-        self.setMinimumSize(1300, 1040)
+        self.resize(1180, 820)
+        self.setMinimumSize(900, 650)
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -232,7 +236,7 @@ class DragTeachWindow(QMainWindow):
         self.tabs.addTab(self.build_path_tab(), "连续轨迹示教")
         self.tabs.addTab(self.build_point_tab(), "点位示教")
         self.tabs.addTab(self.build_camera_tab(), "视觉颜色识别") 
-        main_layout.addWidget(self.tabs)
+        main_layout.addWidget(self.tabs, 1)
 
         main_layout.addWidget(self.build_angle_group())
         main_layout.addWidget(self.build_log_group())
@@ -486,44 +490,73 @@ class DragTeachWindow(QMainWindow):
         table_layout.addLayout(file_buttons)
 
         self.point_table = QTableWidget(0, 13)
-        self.point_table.setWordWrap(True)
-        self.point_table.setHorizontalHeaderLabels(POINT_HEADERS_ZH)
-        self.point_table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        self.point_table.setHorizontalHeader(WrappedHeaderView(Qt.Horizontal, self.point_table))
+        #self.point_table.setWordWrap(True)
+        self.point_table.setHorizontalHeaderLabels(POINT_HEADERS_EN if self.lang == "en" else POINT_HEADERS_ZH)
 
-        column_widths = [
-            75,   
-            75,   
-            75,   
-            75,   
-            75,   
-            75,  
-            75,   
-            110,   
-            220,  
-            95,   
-            140,  
-            140,  
-            85   
-        ] # Total 315   
+        self.point_column_weights = [
+            55, 55, 55, 55, 55, 55, 55,
+            100, 190, 80, 120, 120, 80
+        ]   
 
-        for col, width in enumerate(column_widths):
+        header = self.point_table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.Interactive)
+
+        header.setMinimumSectionSize(50)
+        header.setDefaultAlignment(Qt.AlignCenter)
+        header.setTextElideMode(Qt.ElideNone)
+        header.setStretchLastSection(False)
+
+        default_widths = [
+            60,  # No.
+            60,  # J1
+            60,  # J2
+            60,  # J3
+            60,  # J4
+            60,  # J5
+            60,  # J6
+            100, # Gripper G
+            175, # Arm Max Speed
+            85,  # Pause
+            115, # Gripper Speed
+            115, # Gripper Force
+            100, # Note
+        ]
+
+        for col, width in enumerate(default_widths):
             self.point_table.setColumnWidth(col, width)
-        self.point_table.setSizeAdjustPolicy(QAbstractScrollArea.AdjustToContents)
+
+        # Let the table scroll horizontally if the window is too narrow.
+        self.point_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.point_table.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+
+        # Give the multi-line column labels enough vertical space.
+        header.setMinimumHeight(48)
+        header.setDefaultSectionSize(60)
+
+        self.point_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        self.point_table.setMinimumHeight(200)
+        self.point_table.setSizeAdjustPolicy(QAbstractScrollArea.AdjustIgnored)
+
         self.point_table.verticalHeader().setVisible(False)
         self.point_table.setAlternatingRowColors(True)
         self.point_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.point_table.setSelectionMode(QTableWidget.SingleSelection)
-        self.point_table.resizeRowsToContents()
 
-        table_layout.addWidget(self.point_table)
+        table_layout.addWidget(self.point_table, 1)
+        layout.addWidget(table_group, 1)
 
         hint = QLabel(
             "说明：同步速度只针对J1~J6。六轴最大速度是机械臂关节速度上限，程序按J1~J6角度差自动分配速度；夹爪G不参与同步，播放时通过control_pos_force按表格里的夹爪速度和力度单独执行，默认速度5。蓝色行表示当前动作。"
         )
         hint.setWordWrap(True)
+        hint.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
         hint.setStyleSheet("color: #555;")
-        table_layout.addWidget(hint)
-        layout.addWidget(table_group)
+        layout.addWidget(hint, 0)
+
+        QTimer.singleShot(0, self._resize_point_columns)
+
         return tab
 
     def build_angle_group(self):
@@ -839,6 +872,39 @@ class DragTeachWindow(QMainWindow):
             self.enable_btn.setEnabled(self.is_connected and not self.is_setting_zero and not self.is_toggling_enable)
         self.highlight_point_row(-1)
 
+    def _resize_point_columns(self):
+        if not hasattr(self, "point_table"):
+            return
+
+        self.point_table.horizontalHeader().setStretchLastSection(True)
+
+        table = self.point_table
+        available_width = table.viewport().width()
+
+        if available_width <= 0:
+            return
+
+        weights = self.point_column_weights
+        total_weight = sum(weights)
+
+        # Distribute the available width according to the column weights.
+        widths = [
+            int(available_width * weight / total_weight)
+            for weight in weights
+        ]
+
+        # Account for rounding so the widths add up exactly.
+        widths[-1] += available_width - sum(widths)
+
+        for col, width in enumerate(widths):
+            table.setColumnWidth(col, max(width, 1))
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+
+        if hasattr(self, "point_table"):
+            QTimer.singleShot(0, self._resize_point_columns)
+
     # ==================== 连续轨迹示教 ====================
     def browse_path_save_dir(self):
         path = QFileDialog.getExistingDirectory(self, self.ui("选择保存目录"), self.path_save_dir_edit.text())
@@ -977,6 +1043,8 @@ class DragTeachWindow(QMainWindow):
             return
 
         if not self.is_point_teaching:
+            self.start_point_camera_recording()
+            self.worker.request_start_point_teach(self.point_gravity_hz_spin.value())
             self.is_point_teaching = True
             self.point_teach_btn.setText(self.ui("停止点位示教/保持当前位置"))
             self.point_teach_status_update("状态: 准备中...")
@@ -1002,6 +1070,7 @@ class DragTeachWindow(QMainWindow):
             self.is_point_teaching = False
             self.point_teach_btn.setEnabled(True)
             self.point_teach_btn.setText(self.ui("开始点位示教/重力补偿"))
+            self.stop_point_camera_recording()
 
     def capture_current_point(self):
         if not self.is_connected:
@@ -1020,6 +1089,7 @@ class DragTeachWindow(QMainWindow):
     def on_point_captured(self, q, speed, pause, gripper_speed, gripper_force_limit):
         if len(q) < TOTAL_DOF:
             q = list(q[:ARM_DOF]) + [0.0]
+        self.save_point_camera_reference(q)
         self.append_point_row(PointAction(q=list(q[:TOTAL_DOF]), speed=speed, pause=pause, gripper_speed=gripper_speed, gripper_force_limit=gripper_force_limit, note=""))
 
     def append_point_row(self, action: PointAction):
@@ -1274,9 +1344,72 @@ class DragTeachWindow(QMainWindow):
                 traceback.print_exc()            
 
     def update_camera_frame(self, qt_image):
-        self.camera_feed_label.setPixmap(QPixmap.fromImage(qt_image).scaled(
-            self.camera_feed_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
-        ))
+        # Keep the latest image for point-by-point snapshots.
+        self.latest_camera_image = qt_image.copy()
+
+        # Continue displaying the camera feed.
+        self.camera_feed_label.setPixmap(QPixmap.fromImage(qt_image).scaled(self.camera_feed_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+
+    def start_point_camera_recording(self):
+        """Create a folder for camera references captured during teaching."""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        session_dir = os.path.join(self.get_default_path(), f"point_session_{timestamp}")
+        os.makedirs(session_dir, exist_ok=True)
+
+        self.point_recording_dir = session_dir
+        self.point_recording_csv = os.path.join(session_dir, "camera_references.csv")
+
+        self.point_recording_file = open(self.point_recording_csv, "w", newline="", encoding="utf-8")
+
+        self.point_recording_writer = csv.writer(self.point_recording_file)
+
+        self.point_recording_writer.writerow(["point_number", "timestamp", "image_file", "J1", "J2", "J3", "J4", "J5", "J6", "G"])
+
+        self.point_capture_count = 0
+
+        self.log(f"Camera reference recording folder: {session_dir}")
+
+    def save_point_camera_reference(self, q):
+        """Save a snapshot and associate it with a captured robot pose."""
+        if self.point_recording_writer is None:
+            return
+
+        if self.latest_camera_image is None:
+            self.log("No camera frame available; no snapshot saved for this point.")
+            return
+
+        self.point_capture_count += 1
+        point_number = self.point_capture_count
+
+        filename = f"point_{point_number:03d}.png"
+        filepath = os.path.join(self.point_recording_dir, filename)
+
+        if not self.latest_camera_image.save(filepath, "PNG"):
+            self.log(f"Failed to save camera snapshot: {filepath}")
+            return
+
+        timestamp = datetime.now().isoformat(timespec="milliseconds")
+        angles = list(q[:7])
+
+        while len(angles) < 7:
+            angles.append("")
+
+        self.point_recording_writer.writerow([point_number, timestamp, filename, *angles])
+        self.point_recording_file.flush()
+
+        self.log(f"Saved camera reference for point {point_number}: {filename}")
+
+    def stop_point_camera_recording(self):
+        """Close the session metadata file."""
+        if self.point_recording_file is not None:
+            self.point_recording_file.close()
+
+        self.point_recording_file = None
+        self.point_recording_writer = None
+
+        if self.point_recording_dir:
+            self.log(f"Camera reference recording saved: ", f"{self.point_recording_dir}")
+
     # ==================== 公共回调 ====================
     def on_angles_updated(self, q):
         if len(q) < ARM_DOF:
@@ -1335,6 +1468,38 @@ class DragTeachWindow(QMainWindow):
             self._allow_close = True
             self.close()
 
+class WrappedHeaderView(QHeaderView):
+    def __init__(self, orientation, parent=None):
+        super().__init__(orientation, parent)
+        self.setDefaultAlignment(Qt.AlignCenter)
+        self.setMinimumHeight(48)
+
+    def paintSection(self, painter, rect, logicalIndex):
+        if not rect.isValid():
+            return
+
+        painter.save()
+        painter.fillRect(rect, self.palette().button())
+
+        model = self.model()
+        text = model.headerData(
+            logicalIndex, self.orientation(), Qt.DisplayRole
+        )
+
+        from PyQt5.QtCore import QRect
+        from PyQt5.QtGui import QFontMetrics
+
+        text_rect = rect.adjusted(3, 2, -3, -2)
+        painter.setPen(self.palette().buttonText().color())
+        painter.setFont(self.font())
+
+        painter.drawText(
+            text_rect,
+            Qt.AlignCenter | Qt.TextWordWrap,
+            str(text or "")
+        )
+        painter.restore()
+
 def main():
     app = QApplication(sys.argv)
 
@@ -1345,4 +1510,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

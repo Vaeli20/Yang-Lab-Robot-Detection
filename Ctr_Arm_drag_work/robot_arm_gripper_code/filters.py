@@ -1,6 +1,5 @@
 from collections import deque
 
-
 class VelocityFilter:
     """
     单关节速度滤波：中值滤波去尖峰 + EMA 平滑 + 死区。

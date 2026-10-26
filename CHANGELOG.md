@@ -26,7 +26,27 @@ EX:
 - PATCH Add logic to runsheet teaser delete to delete corresponding
   schedule cards.
 -->
+## Jaelynn - 10/26/2026
+### Changed
+- changed `main.py` to tack screenshots and record while taking trajectory points.
+- removed unneed extra lines in files
+  - `robot_arm_gripper_Code`
+    - `ArmDriver.py`
+    - `camera.py`
+    - `DM_CAN.py`
+    - `filters.py`
+    - `Gripper_test 09-25-2926.py`
+    - `original_main.py`
+    - `point_io.py`
+    - `robot_worker.py`
+    - `robot_worker 09-25-2026.py`
+    - `trajectory_io.py`
+  - `.gitignore`
 
+### Fixed
+- Fixed `main.py` trajectory point table to have proper header spacing and autosize when screen size is changed.
+
+---
 ## Jaelynn - 10/23/2026
 ### Added
 - `original_main.py` Initial main.py file from [Gitee Robot Arm](https://gitee.com/majormj/robot-arm-4340)
@@ -40,5 +60,3 @@ EX:
 - `brainstorm.md` created to keep track of ideas for repo/lab
 ### Changed
 - `readme.md` modified to describe purpose of repository a bit more accurately
-
-  

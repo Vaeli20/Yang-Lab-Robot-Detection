@@ -4,7 +4,6 @@ from enum import IntEnum
 from struct import unpack
 from struct import pack
 
-
 class Motor:
     def __init__(self, MotorType, SlaveID, MasterID):
         """
@@ -66,7 +65,6 @@ class Motor:
             return self.temp_param_dict[RID]
         else:
             return None
-
 
 class MotorControl:
     send_data_frame = np.array(
@@ -294,7 +292,6 @@ class MotorControl:
                     recv_tau = uint_to_float(tau_uint, -TAU_MAX, TAU_MAX, 12)
                     self.motors_map[MasterID].recv_data(state, recv_q, recv_dq, recv_tau)
 
-
     def __process_set_param_packet(self, data, CANID, CMD):
         if CMD == 0x11 and (data[2] == 0x33 or data[2] == 0x55):
             masterid=CANID
@@ -319,7 +316,6 @@ class MotorControl:
                 #float类型
                 num = uint8s_to_float(data[4], data[5], data[6], data[7])
                 self.motors_map[masterid].temp_param_dict[RID] = num
-
 
     def addMotor(self, Motor):
         """
@@ -483,13 +479,11 @@ class MotorControl:
         self.data_save = data[remainder_pos:]
         return frames
 
-
 def LIMIT_MIN_MAX(x, min, max):
     if x <= min:
         x = min
     elif x > max:
         x = max
-
 
 def float_to_uint(x: float, x_min: float, x_max: float, bits):
     LIMIT_MIN_MAX(x, x_min, x_max)
@@ -497,20 +491,17 @@ def float_to_uint(x: float, x_min: float, x_max: float, bits):
     data_norm = (x - x_min) / span
     return np.uint16(data_norm * ((1 << bits) - 1))
 
-
 def uint_to_float(x: np.uint16, min: float, max: float, bits):
     span = max - min
     data_norm = float(x) / ((1 << bits) - 1)
     temp = data_norm * span + min
     return np.float32(temp)
 
-
 def float_to_uint8s(value):
     # Pack the float into 4 bytes
     packed = pack('f', value)
     # Unpack the bytes into four uint8 values
     return unpack('4B', packed)
-
 
 def data_to_uint8s(value):
     # Check if the value is within the range of uint32
@@ -523,7 +514,6 @@ def data_to_uint8s(value):
     # Unpack the bytes into four uint8 values
     return unpack('4B', packed)
 
-
 def is_in_ranges(number):
     """
     check if the number is in the range of uint32
@@ -534,13 +524,11 @@ def is_in_ranges(number):
         return True
     return False
 
-
 def uint8s_to_uint32(byte1, byte2, byte3, byte4):
     # Pack the four uint8 values into a single uint32 value in little-endian order
     packed = pack('<4B', byte1, byte2, byte3, byte4)
     # Unpack the packed bytes into a uint32 value
     return unpack('<I', packed)[0]
-
 
 def uint8s_to_float(byte1, byte2, byte3, byte4):
     # Pack the four uint8 values into a single float value in little-endian order
@@ -548,18 +536,15 @@ def uint8s_to_float(byte1, byte2, byte3, byte4):
     # Unpack the packed bytes into a float value
     return unpack('<f', packed)[0]
 
-
 def print_hex(data):
     hex_values = [f'{byte:02X}' for byte in data]
     print(' '.join(hex_values))
-
 
 def get_enum_by_index(index, enum_class):
     try:
         return enum_class(index)
     except ValueError:
         return None
-
 
 class DM_Motor_Type(IntEnum):
     DM4310 = 0
@@ -575,7 +560,6 @@ class DM_Motor_Type(IntEnum):
     DMH6215 = 10
     DMG6220 = 11
     DM6248 = 12
-
 
 class DM_variable(IntEnum):
     UV_Value = 0
@@ -623,7 +607,6 @@ class DM_variable(IntEnum):
     dir = 55
     p_m = 80
     xout = 81
-
 
 class Control_Type(IntEnum):
     MIT = 1

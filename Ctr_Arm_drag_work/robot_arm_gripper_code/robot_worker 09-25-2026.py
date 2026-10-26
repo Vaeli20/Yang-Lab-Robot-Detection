@@ -11,10 +11,8 @@ from filters import VelocityFilter
 from trajectory_io import read_trajectory_csv, TrajectoryPoint
 from point_io import PointAction
 
-
 ARM_DOF = 6
 TOTAL_DOF = 7  # J1~J6 + G(夹爪反馈位置)
-
 
 class RobotWorker(QThread):
     """
@@ -1275,5 +1273,4 @@ class RobotWorker(QThread):
     # ==================== Gripper Control ==================== 
     def request_control_gripper(self, target_position: float, speed: float, force: float):
         self._cmd_q.put(("control_gripper", target_position, speed, force))
-
     

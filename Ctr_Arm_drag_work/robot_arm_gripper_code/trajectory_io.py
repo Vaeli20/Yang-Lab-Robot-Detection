@@ -3,10 +3,8 @@ import os
 from dataclasses import dataclass
 from typing import List, Optional
 
-
 ARM_DOF = 6
 TOTAL_DOF = 7  # J1~J6 + G(夹爪)
-
 
 @dataclass
 class TrajectoryPoint:
@@ -14,20 +12,16 @@ class TrajectoryPoint:
     q: List[float]          # 新版优先为7维：J1~J6 + G
     dq: Optional[List[float]] = None
 
-
 TRAJECTORY_HEADER = [
     "timestamp",
     "j1", "j2", "j3", "j4", "j5", "j6", "g",
     "v1", "v2", "v3", "v4", "v5", "v6", "vg",
 ]
 
-
 OLD_WITH_CMD_GRIPPER_HEADER_HINTS = {"gripper_position", "gripper_velocity", "gripper_force_limit"}
-
 
 def _to_float_list(row: List[str], start: int, count: int) -> List[float]:
     return [float(row[start + i]) for i in range(count)]
-
 
 def read_trajectory_csv(filepath: str) -> List[TrajectoryPoint]:
     """
@@ -85,7 +79,6 @@ def read_trajectory_csv(filepath: str) -> List[TrajectoryPoint]:
         p.t = max(0.0, p.t - t0)
 
     return points
-
 
 def save_trajectory_csv(filepath: str, rows: List[List[float]]) -> None:
     os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
