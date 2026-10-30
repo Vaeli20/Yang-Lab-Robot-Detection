@@ -26,6 +26,17 @@ EX:
 - PATCH Add logic to runsheet teaser delete to delete corresponding
   schedule cards.
 -->
+## Jaelynn - 10/30/2026
+### Added
+- `Trajectory Points` folder had trejectory points added to it from todays testing of point trajectories camera references. <b>**NOTE** worked as intended.
+### Changed
+- added minor changes to `main.py` to ensure point trajectory recorded images correctly and stored them inside the correct file location.<b>Along with adding minor spelling changes to port connection
+- changed line 51 in `camera.py` to work for computer camera. > **NOTE** Will need to change to 1 for web camera.
+
+### Removed
+- removed `robot_worker 09-25-2026.py` file as it was a duplicate of current `robot_worker.py` file
+
+---
 ## Jaelynn - 10/26/2026
 ### Changed
 - changed `main.py` to tack screenshots and record while taking trajectory points.

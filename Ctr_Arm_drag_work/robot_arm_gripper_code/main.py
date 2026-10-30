@@ -51,8 +51,8 @@ ZH_TO_EN = {
     "连接": "Connect",
     "连接中...": "Connecting...",
     "断开": "Disconnect",
-    "断开中，正在回零...": "Disconnecting, returning home...",
-    "关闭中，正在回零并失能...": "Closing, returning home and disabling...",
+    "断开中...": "Disconnecting...",
+    "关闭中...": "Closing...",
     "设置0点": "Set Zero",
     "设置0点中...": "Setting zero...",
     "使能": "Enable",
@@ -690,7 +690,7 @@ class DragTeachWindow(QMainWindow):
         QMessageBox.warning(self, self.ui(title_zh), message)
 
     def get_default_path(self):
-        path = os.path.join(os.path.expanduser("~"), "Documents", "RobotTrajectories")
+        path = os.path.join(os.path.expanduser("~"), "Yang-Lab-Robot-Detection-test", "Ctr_Arm_drag_work", "robot_arm_gripper_code", "Trajectory Points", "RobotTrajectories")
         os.makedirs(path, exist_ok=True)
         return path
 
@@ -723,8 +723,8 @@ class DragTeachWindow(QMainWindow):
             self.connect_btn.setEnabled(False)
             self.set_zero_btn.setEnabled(False)
             self.enable_btn.setEnabled(False)
-            self.connect_btn.setText(self.ui("断开中，正在回零..."))
-            self.conn_status_raw = "断开中，正在回零..."
+            self.connect_btn.setText(self.ui("断开中..."))
+            self.conn_status_raw = "断开中..."
             self.conn_status.setText(self.ui_status(self.conn_status_raw))
             self.conn_status.setStyleSheet("color: orange;")
             self.worker.request_disconnect()
@@ -958,7 +958,6 @@ class DragTeachWindow(QMainWindow):
             except Exception as e:
                 self.warn_text("错误", f"保存失败:\n{e}")
                 self.log(f"保存失败: {e}")
-
         self.is_path_recording = False
         self.path_record_btn.setEnabled(True)
         self.path_record_btn.setText(self.ui("开始连续拖动示教"))
@@ -1408,7 +1407,7 @@ class DragTeachWindow(QMainWindow):
         self.point_recording_writer = None
 
         if self.point_recording_dir:
-            self.log(f"Camera reference recording saved: ", f"{self.point_recording_dir}")
+            self.log(f"Camera reference recording saved: {self.point_recording_dir}")
 
     # ==================== 公共回调 ====================
     def on_angles_updated(self, q):
@@ -1452,7 +1451,7 @@ class DragTeachWindow(QMainWindow):
 
         self._closing_after_home = True
         self.log("关闭程序：正在回零并失能，请勿断电。")
-        self.conn_status_raw = "关闭中，正在回零并失能..."
+        self.conn_status_raw = "关闭中..."
         self.conn_status.setText(self.ui_status(self.conn_status_raw))
         self.conn_status.setStyleSheet("color: orange;")
         self.connect_btn.setEnabled(False)
