@@ -202,6 +202,25 @@ class RobotWorker(QThread):
                 self._handle_command(cmd)
             except Exception as e:
                 self.log_msg.emit(traceback.format_exc())
+
+                # If connecting failed, clean up and return to disconnected state.
+                if cmd[0] == "connect":
+                    if self.arm is not None:
+                        try:
+                            self.arm.close_serial()
+                        except Exception as close_error:
+                            self.log_msg.emit(f"连接失败后关闭串口失败: {close_error}")
+
+                    self.arm = None
+                    self.connected = False
+                    self.enabled = False
+                    self.current_mode = None
+                    self.state = "idle"
+                    self._gripper_motor = None
+
+                    # Tell the UI that the connection attempt failed.
+                    self.connection_changed.emit(False, "")
+
                 self.error_msg.emit(str(e))
 
     def _handle_command(self, cmd):

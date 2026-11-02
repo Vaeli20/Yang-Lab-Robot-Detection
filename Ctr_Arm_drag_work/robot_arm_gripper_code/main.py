@@ -1,6 +1,8 @@
 import os
 import sys
 import csv
+import cv2
+import time
 from datetime import datetime
 from typing import List
 import torch
@@ -140,7 +142,7 @@ ZH_TO_EN = {
     "状态: 点位示教已停止": "Status: Point teaching stopped",
     "状态: 点位播放中...": "Status: Point playback running...",
     "状态: 点位播放完成": "Status: Point playback complete",
-    "视觉颜色识别": "Color Detection", # Not translating
+    "相机传感器": "Camera Sensor",
     "AI 物体与颜色检测器": "AI Object and Color Detector",
     "关闭摄像头": "Camera Off",
     "打开摄像头": "Camera On",
@@ -210,6 +212,11 @@ class DragTeachWindow(QMainWindow):
         self.point_recording_writer = None
         self.point_capture_count = 0
 
+        # Timer for capturing camera frames during continuous trajectory recording
+        self.CT_camera_timer = QTimer(self)
+        self.CT_camera_timer.timeout.connect(self.capture_CT_camera_frame)
+        self.CT_camera_interval = 200  # Capture every 200 ms (5 FPS)
+        
         self.init_ui()
         self.scan_serial_ports() 
 
@@ -235,7 +242,7 @@ class DragTeachWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.tabs.addTab(self.build_path_tab(), "连续轨迹示教")
         self.tabs.addTab(self.build_point_tab(), "点位示教")
-        self.tabs.addTab(self.build_camera_tab(), "视觉颜色识别") 
+        self.tabs.addTab(self.build_camera_tab(), "相机传感器") 
         main_layout.addWidget(self.tabs, 1)
 
         main_layout.addWidget(self.build_angle_group())
@@ -584,18 +591,40 @@ class DragTeachWindow(QMainWindow):
         group = QGroupBox("AI 物体与颜色检测器")
         group_layout = QVBoxLayout(group)
 
+        # Camera selection controls
+        camera_layout = QHBoxLayout()
+
+        camera_layout.addWidget(QLabel("Camera:"))
+
+        self.camera_selector = QComboBox()
+        self.camera_selector.setMinimumWidth(200)
+        camera_layout.addWidget(self.camera_selector)
+
+        self.refresh_camera_btn = QPushButton("Refresh Cameras")
+        self.refresh_camera_btn.clicked.connect(self.scan_cameras)
+        camera_layout.addWidget(self.refresh_camera_btn)
+
+        camera_layout.addStretch()
+        group_layout.addLayout(camera_layout)
+
+        # Camera preview
         self.camera_feed_label = QLabel("关闭摄像头")
         self.camera_feed_label.setAlignment(Qt.AlignCenter)
         self.camera_feed_label.setStyleSheet("background-color: black; color: white;")
         self.camera_feed_label.setMinimumSize(640, 480)
         group_layout.addWidget(self.camera_feed_label)
 
+        # Camera on/off button
         self.toggle_camera_btn = QPushButton("打开摄像头")
         self.toggle_camera_btn.setMinimumHeight(40)
         self.toggle_camera_btn.clicked.connect(self.toggle_camera_detector)
         group_layout.addWidget(self.toggle_camera_btn)
 
         layout.addWidget(group)
+
+        # Scan cameras when the tab is created
+        self.scan_cameras()
+
         return tab
     # ==================== 基础功能 ====================
 
@@ -634,7 +663,7 @@ class DragTeachWindow(QMainWindow):
         self.language_btn.setText("English" if self.lang == "zh" else "中文")
         self.tabs.setTabText(0, self.ui("连续轨迹示教"))
         self.tabs.setTabText(1, self.ui("点位示教"))
-        self.tabs.setTabText(2, self.ui("视觉颜色识别"))
+        self.tabs.setTabText(2, self.ui("相机传感器"))
         self.point_table.setHorizontalHeaderLabels(POINT_HEADERS_EN if self.lang == "en" else POINT_HEADERS_ZH)
 
         forward = ZH_TO_EN if self.lang == "en" else EN_TO_ZH
@@ -939,6 +968,7 @@ class DragTeachWindow(QMainWindow):
 
         if not self.is_path_recording:
             self.is_path_recording = True
+            self.start_CT_camera_recording()
             self.path_record_btn.setText(self.ui("停止连续记录"))
             self.set_path_record_controls_enabled(False)
             self.path_record_status_update("状态: 准备中...")
@@ -958,6 +988,10 @@ class DragTeachWindow(QMainWindow):
             except Exception as e:
                 self.warn_text("错误", f"保存失败:\n{e}")
                 self.log(f"保存失败: {e}")
+
+        # Stop Camera Recording
+        self.stop_CT_camera_recording()
+
         self.is_path_recording = False
         self.path_record_btn.setEnabled(True)
         self.path_record_btn.setText(self.ui("开始连续拖动示教"))
@@ -1319,12 +1353,21 @@ class DragTeachWindow(QMainWindow):
     
     def toggle_camera_detector(self):
         if not hasattr(self, 'camera_worker') or not self.camera_worker.isRunning():
+            camera_index = self.camera_selector.currentData()
 
-            self.camera_worker = CameraWork()
+            if camera_index is None:
+                self.warn("错误", "没有检测到可用摄像头")
+                return
+            
+            self.camera_worker = CameraWork(camera_index=camera_index)
             self.camera_worker.frame_ready.connect(self.update_camera_frame)
             self.camera_worker.log_msg.connect(self.log)
+            self.camera_worker.finished.connect(self.on_camera_finished)
 
             self.camera_worker.start()
+
+            self.camera_selector.setEnabled(False)
+            self.refresh_camera_btn.setEnabled(False)
 
             self.toggle_camera_btn.setText(self.ui("关闭摄像头"))
             self.log(self.ui("开启摄像头检测"))
@@ -1335,6 +1378,11 @@ class DragTeachWindow(QMainWindow):
 
                 self.toggle_camera_btn.setText(self.ui("打开摄像头"))
                 self.camera_feed_label.setText(self.ui("关闭摄像头"))
+                self.camera_feed_label.setPixmap(QPixmap())
+
+                self.camera_selector.setEnabled(True)
+                self.refresh_camera_btn.setEnabled(True)
+
                 self.log(self.ui("关闭摄像头"))
 
             except Exception:
@@ -1409,6 +1457,136 @@ class DragTeachWindow(QMainWindow):
         if self.point_recording_dir:
             self.log(f"Camera reference recording saved: {self.point_recording_dir}")
 
+    def start_CT_camera_recording(self):
+        """Create a folder and start camera recording during trajectory teaching."""
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        session_dir = os.path.join(self.get_default_path(), f"trajectory_session_{timestamp}")
+
+        self.point_recording_dir = session_dir
+        self.CT_camera_images_dir = os.path.join(session_dir, "camera_images")
+
+        os.makedirs(self.CT_camera_images_dir, exist_ok=True)
+
+        self.point_recording_csv = os.path.join(session_dir, "camera_references.csv")
+
+        self.point_recording_file = open(self.point_recording_csv, "w", newline="", encoding="utf-8")
+
+        self.point_recording_writer = csv.writer(self.point_recording_file)
+
+        self.point_recording_writer.writerow(["elapsed_time_s", "image_file"])
+
+        self.point_capture_count = 0
+
+        # Start camera recording timer
+        self.CT_camera_start_time = time.perf_counter()
+        self.CT_camera_timer.start(self.CT_camera_interval)
+
+        self.log(f"Camera recording folder: {session_dir}")
+
+    def save_CT_reference(self):
+        """Save a snapshot and associate it with a captured robot pose."""
+        if self.point_recording_writer is None:
+            return
+
+        if self.latest_camera_image is None:
+            self.log("No camera frame available; no snapshot saved for this point.")
+            return
+
+        self.point_capture_count += 1
+        point_number = self.point_capture_count
+
+        filename = f"point_{point_number:03d}.png"
+        filepath = os.path.join(self.point_recording_dir, filename)
+
+        if not self.latest_camera_image.save(filepath, "PNG"):
+            self.log(f"Failed to save camera snapshot: {filepath}")
+            return
+
+        timestamp = datetime.now().isoformat(timespec="milliseconds")
+
+        self.point_recording_writer.writerow([point_number, timestamp, filename])
+        self.point_recording_file.flush()
+
+        self.log(f"Saved camera reference for point {point_number}: {filename}")
+
+    def capture_CT_camera_frame(self):
+        """Capture and save the latest camera frame during trajectory recording."""
+        
+        if self.point_recording_writer is None:
+            return
+
+        if self.latest_camera_image is None:
+            return
+
+        self.point_capture_count += 1
+
+        filename = f"frame_{self.point_capture_count:06d}.png"
+        image_path = os.path.join(self.CT_camera_images_dir, filename)
+
+        # Save the latest camera frame
+        if not self.latest_camera_image.save(image_path, "PNG"):
+            self.log(f"Failed to save camera frame: {image_path}")
+            return
+
+        # Record elapsed time and image filename
+        elapsed_time = time.perf_counter() - self.CT_camera_start_time
+
+        self.point_recording_writer.writerow([elapsed_time, filename])
+
+        self.point_recording_file.flush()
+
+    def stop_CT_camera_recording(self):
+        """Stop camera recording and close the reference file."""
+
+        self.CT_camera_timer.stop()
+
+        if self.point_recording_file is not None:
+            self.point_recording_file.close()
+
+        self.point_recording_file = None
+        self.point_recording_writer = None
+
+        self.log("Camera recording stopped.")
+
+    def scan_cameras(self):
+        # Don't scan while a camera is already running
+        if hasattr(self, 'camera_worker'):
+            if self.camera_worker.isRunning():
+                return
+
+        self.camera_selector.clear()
+
+        available_cameras = []
+
+        # Check camera indices 0-9
+        for index in range(10):
+            if check_camera_quietly(index):
+                available_cameras.append(index)
+
+        # Populate dropdown
+        for index in available_cameras:
+            self.camera_selector.addItem(
+                f"Camera {index}",
+                index
+            )
+
+        if not available_cameras:
+            self.camera_selector.addItem("No cameras detected", None)
+            self.log("No available cameras detected.")
+        else:
+            self.log(f"Detected cameras: {available_cameras}")
+
+    def on_camera_finished(self):
+        self.toggle_camera_btn.setText(self.ui("打开摄像头"))
+
+        self.camera_selector.setEnabled(True)
+        self.refresh_camera_btn.setEnabled(True)
+
+        self.camera_feed_label.setPixmap(QPixmap())
+        self.camera_feed_label.setText(self.ui("关闭摄像头"))
+
     # ==================== 公共回调 ====================
     def on_angles_updated(self, q):
         if len(q) < ARM_DOF:
@@ -1437,8 +1615,13 @@ class DragTeachWindow(QMainWindow):
 
     def log(self, msg):
         ts = datetime.now().strftime("%H:%M:%S")
-        self.log_text.append(f"[{ts}] {msg}")
-        print(msg, flush=True)
+        log_message = f"[{ts}] {msg}"
+
+        # Check whether the log widget has been created yet
+        if hasattr(self, "log_text") and self.log_text is not None:
+            self.log_text.append(log_message)
+        else:
+            print(log_message)
 
     def closeEvent(self, event):
         if self._allow_close:
@@ -1506,6 +1689,30 @@ def main():
     window.show()
 
     sys.exit(app.exec_())
+
+def check_camera_quietly(index):
+    """Check whether a camera works without printing OpenCV warnings."""
+    old_stderr = os.dup(2)
+    cap = None
+
+    try:
+        with open(os.devnull, "w") as devnull:
+            os.dup2(devnull.fileno(), 2)
+
+            cap = cv2.VideoCapture(index, cv2.CAP_MSMF)
+
+            if cap.isOpened():
+                ret, frame = cap.read()
+                return ret
+
+            return False
+
+    finally:
+        if cap is not None:
+            cap.release()
+
+        os.dup2(old_stderr, 2)
+        os.close(old_stderr)
 
 if __name__ == "__main__":
     main()

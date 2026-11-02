@@ -1,5 +1,6 @@
 import os
 import cv2
+
 import yaml
 import torch
 
@@ -16,9 +17,10 @@ class CameraWork(QThread):
     frame_ready = pyqtSignal(QImage)
     log_msg = pyqtSignal(str)
 
-    def __init__(self, config_path='config.yaml'):
+    def __init__(self, camera_index=0, config_path='config.yaml'):
         super().__init__()
         self.running = False
+        self.camera_index = camera_index
         self.cfg = self.load_config(config_path)
 
     def load_config(self, path='config.yaml'):
@@ -48,7 +50,7 @@ class CameraWork(QThread):
             detector = Detector(model_name=model_name, conf=conf_th, iou=iou_th, imgsz=self.cfg['imgsz'])
             motion = MotionDetector(history=motion_history, area_threshold=motion_area_threshold)
             
-            cap = cv2.VideoCapture(0)
+            cap = cv2.VideoCapture(self.camera_index, cv2.CAP_MSMF)
             if not cap.isOpened():
                 self.log_msg.emit("ERROR: Could not open camera.")
                 return

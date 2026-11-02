@@ -26,12 +26,19 @@ EX:
 - PATCH Add logic to runsheet teaser delete to delete corresponding
   schedule cards.
 -->
+## Jaelynn - 11/2/2026
+### Changed
+- Modified `robot_worker.py` function `_drain_commands()` exception line, ```python except Exception as e:```, to revert back to display `connect` if port doesn't connect
+- Implemented camera recording in continous trajectory from `main.py`
+- for both `main.py` and `camera.py` the camera section was changed to allow changing of camera in the python application and not <br>solified in the code. 
+
+---
 ## Jaelynn - 10/30/2026
 ### Added
-- `Trajectory Points` folder had trejectory points added to it from todays testing of point trajectories camera references. <b>**NOTE** worked as intended.
+- `Trajectory Points` folder had trejectory points added to it from todays testing of point trajectories camera references. <br>**NOTE** worked as intended.
 ### Changed
-- added minor changes to `main.py` to ensure point trajectory recorded images correctly and stored them inside the correct file location.<b>Along with adding minor spelling changes to port connection
-- changed line 51 in `camera.py` to work for computer camera. > **NOTE** Will need to change to 1 for web camera.
+- added minor changes to `main.py` to ensure point trajectory recorded images correctly and stored them inside the correct file location.<br>Along with adding minor spelling changes to port connection
+- changed line 51 in `camera.py` to work for computer camera.  **NOTE** Will need to change to 1 for web camera.
 
 ### Removed
 - removed `robot_worker 09-25-2026.py` file as it was a duplicate of current `robot_worker.py` file
