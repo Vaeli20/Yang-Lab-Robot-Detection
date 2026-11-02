@@ -11,10 +11,8 @@ from filters import VelocityFilter
 from trajectory_io import read_trajectory_csv, TrajectoryPoint
 from point_io import PointAction
 
-
 ARM_DOF = 6
 TOTAL_DOF = 7  # J1~J6 + G(夹爪反馈位置)
-
 
 class RobotWorker(QThread):
     """

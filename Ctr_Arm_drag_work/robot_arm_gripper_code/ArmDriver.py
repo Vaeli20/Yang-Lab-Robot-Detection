@@ -23,7 +23,6 @@ class Matrix3x3:
     def multiply_vector(self, I, v):
         return np.dot(I, v)
 
-
 class InverseDynamics:
     @staticmethod
     def dh_trans(alpha, a, d, theta):
@@ -198,7 +197,6 @@ class RobotController:
             self.RobotCtrl.addMotor(joint)
         self.RobotCtrl.addMotor(self.gripper)
 
-
         # 反转轴：2,3,4,5（基于0的索引：1,2,3,4）
         self.inverted_axes = [1, 2, 3, 4]  # 需要反转的电机索引，从0开始
 
@@ -214,7 +212,6 @@ class RobotController:
             print(f"Serial port {self.serial_device.port} closed successfully")
         else:
             print("Serial port is not open or does not exist")
-
 
     def enable(self):
         for joint in self.joints:
@@ -297,7 +294,6 @@ class RobotController:
         if curr_mode != mode:
             return False
         return True
-    
 
     # def set_mode(self):
     #     for i, joint in enumerate(self.joints):
@@ -320,7 +316,6 @@ class RobotController:
             return False
         
         return True
-    
 
     def set_pos_vel_mode(self):
         for i, joint in enumerate(self.joints):
@@ -332,8 +327,6 @@ class RobotController:
             return False
         
         return True
-
-
 
     # def set_joint_param(self):
     #     for joint in self.joints:
@@ -348,7 +341,6 @@ class RobotController:
     #                 return False
 
     #     return True
-
 
     def set_zero(self) -> bool:
         ret = True

@@ -48,7 +48,7 @@ class CameraWork(QThread):
             detector = Detector(model_name=model_name, conf=conf_th, iou=iou_th, imgsz=self.cfg['imgsz'])
             motion = MotionDetector(history=motion_history, area_threshold=motion_area_threshold)
             
-            cap = cv2.VideoCapture(1)
+            cap = cv2.VideoCapture(0)
             if not cap.isOpened():
                 self.log_msg.emit("ERROR: Could not open camera.")
                 return

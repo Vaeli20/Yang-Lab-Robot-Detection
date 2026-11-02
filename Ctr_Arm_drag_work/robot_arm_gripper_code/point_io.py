@@ -3,10 +3,8 @@ import os
 from dataclasses import dataclass
 from typing import List
 
-
 ARM_DOF = 6
 TOTAL_DOF = 7  # J1~J6 + G(夹爪)
-
 
 @dataclass
 class PointAction:
@@ -16,7 +14,6 @@ class PointAction:
     gripper_speed: float = 5.0        # 夹爪单独速度，不参与J1~J6同步计算
     gripper_force_limit: float = 0.1  # 如果驱动没有力限接口，只保存，不发送
     note: str = ""
-
 
 POINT_HEADER = [
     "index",
@@ -28,7 +25,6 @@ POINT_HEADER = [
     "note",
 ]
 
-
 def _pad_q(q: List[float]) -> List[float]:
     q = list(q)
     if len(q) >= TOTAL_DOF:
@@ -36,7 +32,6 @@ def _pad_q(q: List[float]) -> List[float]:
     if len(q) >= ARM_DOF:
         return q[:ARM_DOF] + [0.0]
     return q + [0.0] * (TOTAL_DOF - len(q))
-
 
 def save_point_program_csv(filepath: str, actions: List[PointAction]) -> None:
     os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
@@ -56,7 +51,6 @@ def save_point_program_csv(filepath: str, actions: List[PointAction]) -> None:
                     a.note,
                 ]
             )
-
 
 def read_point_program_csv(filepath: str) -> List[PointAction]:
     """

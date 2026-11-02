@@ -26,12 +26,48 @@ EX:
 - PATCH Add logic to runsheet teaser delete to delete corresponding
   schedule cards.
 -->
+## Jaelynn - 10/30/2026
+### Added
+- `Trajectory Points` folder had trejectory points added to it from todays testing of point trajectories camera references. <b>**NOTE** worked as intended.
+### Changed
+- added minor changes to `main.py` to ensure point trajectory recorded images correctly and stored them inside the correct file location.<b>Along with adding minor spelling changes to port connection
+- changed line 51 in `camera.py` to work for computer camera. > **NOTE** Will need to change to 1 for web camera.
 
+### Removed
+- removed `robot_worker 09-25-2026.py` file as it was a duplicate of current `robot_worker.py` file
+
+---
+## Jaelynn - 10/26/2026
+### Changed
+- changed `main.py` to tack screenshots and record while taking trajectory points.
+- removed unneed extra lines in files
+  - `robot_arm_gripper_Code`
+    - `ArmDriver.py`
+    - `camera.py`
+    - `DM_CAN.py`
+    - `filters.py`
+    - `Gripper_test 09-25-2926.py`
+    - `original_main.py`
+    - `point_io.py`
+    - `robot_worker.py`
+    - `robot_worker 09-25-2026.py`
+    - `trajectory_io.py`
+  - `.gitignore`
+
+### Fixed
+- Fixed `main.py` trajectory point table to have proper header spacing and autosize when screen size is changed.
+
+---
+## Jaelynn - 10/23/2026
+### Added
+- `original_main.py` Initial main.py file from [Gitee Robot Arm](https://gitee.com/majormj/robot-arm-4340)
+### Changed
+- `main.py` modified python window size to have set min size and max size. Avoiding it going above what the screen can hold. <br> Along with fixing point header column size and having text from notes to wrap. All implemented in en or zh versions.
+
+---
 ## Jaelynn - 10/22/2026
 ### Added
 - `CHANGELOG.md` file created for initial set up for future documentation of changes made
 - `brainstorm.md` created to keep track of ideas for repo/lab
 ### Changed
 - `readme.md` modified to describe purpose of repository a bit more accurately
-
-  
