@@ -420,43 +420,99 @@ class MotorControl:
 
     def change_motor_param(self, Motor, RID, data):
         """
-        change the RID of the motor 改变电机的参数
-        :param Motor: Motor object 电机对象
-        :param RID: DM_variable 电机参数
-        :param data: 电机参数的值
-        :return: True or False ,True means success, False means fail
+        Change a motor parameter and verify the new value.
         """
         max_retries = 20
-        retry_interval = 0.05  #retry times
+        retry_interval = 0.05
+
+        # Remove the previously stored value so it cannot be mistaken
+        # for the response to this new parameter change.
+        Motor.temp_param_dict.pop(RID, None)
 
         self.__write_motor_param(Motor, RID, data)
+
         for _ in range(max_retries):
             self.recv_set_param_data()
-            if Motor.SlaveID in self.motors_map and RID in self.motors_map[Motor.SlaveID].temp_param_dict:
-                if abs(self.motors_map[Motor.SlaveID].temp_param_dict[RID] - data) < 0.1:
+
+            if RID in Motor.temp_param_dict:
+                received_value = Motor.temp_param_dict[RID]
+
+                if abs(received_value - data) < 0.1:
                     return True
-                else:
-                    return False
+
+                print(
+                    f"Motor {Motor.SlaveID:02X}: "
+                    f"parameter {RID} verification failed. "
+                    f"Expected {data}, received {received_value}"
+                )
+                return False
+
             sleep(retry_interval)
+
+        print(
+            f"Motor {Motor.SlaveID:02X}: "
+            f"timeout reading parameter {RID} after change"
+        )
         return False
+        #"""
+        #change the RID of the motor 改变电机的参数
+        #:param Motor: Motor object 电机对象
+        #:param RID: DM_variable 电机参数
+        #:param data: 电机参数的值
+        #:return: True or False ,True means success, False means fail
+        #"""
+        #max_retries = 20
+        #retry_interval = 0.05  #retry times
+
+        #self.__write_motor_param(Motor, RID, data)
+        #for _ in range(max_retries):
+        #    self.recv_set_param_data()
+         #   if Motor.SlaveID in self.motors_map and RID in self.motors_map[Motor.SlaveID].temp_param_dict:
+         #       if abs(self.motors_map[Motor.SlaveID].temp_param_dict[RID] - data) < 0.1:
+        #            return True
+       #         else:
+        #            return False
+          #  sleep(retry_interval)
+        #return False
 
     def read_motor_param(self, Motor, RID):
         """
-        read only the RID of the motor 读取电机的内部信息例如 版本号等
-        :param Motor: Motor object 电机对象
-        :param RID: DM_variable 电机参数
-        :return: 电机参数的值
+        Read a motor parameter and wait for a fresh response.
         """
         max_retries = 20
-        retry_interval = 0.05  #retry times
+        retry_interval = 0.05
+
+        Motor.temp_param_dict.pop(RID, None)
         self.__read_RID_param(Motor, RID)
+
         for _ in range(max_retries):
             sleep(retry_interval)
             self.recv_set_param_data()
-            if Motor.SlaveID in self.motors_map:
-                if RID in self.motors_map[Motor.SlaveID].temp_param_dict:
-                    return self.motors_map[Motor.SlaveID].temp_param_dict[RID]
+
+            if RID in Motor.temp_param_dict:
+                return Motor.temp_param_dict[RID]
+
+        print(
+            f"Motor {Motor.SlaveID:02X}: "
+            f"timeout reading parameter {RID}"
+        )
         return None
+        #"""
+        #read only the RID of the motor 读取电机的内部信息例如 版本号等
+        #:param Motor: Motor object 电机对象
+        #:param RID: DM_variable 电机参数
+        #:return: 电机参数的值
+        #"""
+        #max_retries = 20
+        #retry_interval = 0.05  #retry times
+        #self.__read_RID_param(Motor, RID)
+        #for _ in range(max_retries):
+          #  sleep(retry_interval)
+            #self.recv_set_param_data()
+            #if Motor.SlaveID in self.motors_map:
+          #      if RID in self.motors_map[Motor.SlaveID].temp_param_dict:
+           #         return self.motors_map[Motor.SlaveID].temp_param_dict[RID]
+        #return None
 
     # -------------------------------------------------
     # Extract packets from the serial data

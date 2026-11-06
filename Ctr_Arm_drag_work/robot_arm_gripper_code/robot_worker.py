@@ -49,6 +49,7 @@ class RobotWorker(QThread):
     enable_state_changed = pyqtSignal(bool)
     enable_toggle_finished = pyqtSignal(bool, bool, str)
     zero_set_finished = pyqtSignal(bool, str)
+    home_return_finished = pyqtSignal(bool, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -102,12 +103,16 @@ class RobotWorker(QThread):
 
         # 断开/关闭前自动回零参数。
         # 只回 J1~J6；夹爪仍保持力位混合模式，不强制夹爪回零，避免夹持物体时误动作。
-        self.home_target = [0.0] * ARM_DOF
+        self.home_target = None
         self.home_speed = 1.0          # rad/s，回零时最大关节速度
         self.home_speed_min = 0.05     # rad/s，角度很小时给一个最低速度
         self.home_tolerance = 0.03     # rad，判断到达零位的角度误差
         self.home_timeout = 12.0       # s，回零最长等待时间
         self.home_resend_period = 0.25 # s，回零过程中周期性重发目标
+
+        self.home_capture_tolerance = 0.01
+        self.home_capture_stable_time = 2.0
+        self.home_capture_timeout = 30.0
 
         # 模式切换参数：底层电机偶尔漏收时可改为3。
         self.mode_repeat = 2
@@ -165,6 +170,9 @@ class RobotWorker(QThread):
 
     def request_set_enabled(self, enabled: bool):
         self._cmd_q.put(("set_enabled", bool(enabled)))
+
+    def request_return_home(self):
+        self._cmd_q.put(("return_home",))
 
     # ==================== 主循环 ====================
     def run(self):
@@ -253,6 +261,8 @@ class RobotWorker(QThread):
             self._handle_set_zero_command()
         elif name == "set_enabled":
             self._handle_set_enabled_command(bool(cmd[1]))
+        elif name == "return_home":
+            self._handle_return_home_command()
 
     def _require_idle_or(self, allowed_state: str):
         if self.state not in ("idle", allowed_state):
@@ -280,6 +290,40 @@ class RobotWorker(QThread):
             self.log_msg.emit(message)
             self.enable_state_changed.emit(bool(self.enabled))
             self.enable_toggle_finished.emit(True, bool(self.enabled), message)
+
+    def _handle_return_home_command(self):
+        """Move only J1~J6 to the saved home position."""
+        try:
+            if self.arm is None or not self.connected:
+                raise RuntimeError("请先连接机械臂")
+
+            if not self.enabled:
+                raise RuntimeError("请先使能机械臂")
+
+            if self.state != "idle":
+                raise RuntimeError(f"当前正在执行 {self.state}，请先停止当前任务")
+
+            if self.home_target is None:
+                raise RuntimeError("Home位置尚未保存。请重新连接机械臂，" "并等待连接后的初始动作完成。")
+
+            self.state = "return_home"
+
+            self.log_msg.emit("正在返回保存的初始位置...")
+
+            self._move_arm_to_home(self.home_target)
+
+            self.log_msg.emit("机械臂已返回保存的初始位置。")
+
+        except Exception as e:
+            self.log_msg.emit(f"返回初始位置失败: {e}")
+            self.home_return_finished.emit(False, str(e))
+
+        else:
+            self.home_return_finished.emit(True, "已返回初始位置")
+
+        finally:
+            if self.state == "return_home":
+                self.state = "idle"
 
     def _set_motor_enabled(self, target_enabled: bool):
         if self.arm is None or not self.connected:
@@ -395,8 +439,61 @@ class RobotWorker(QThread):
             else:
                 self.log_msg.emit("警告：当前反馈只有6维。请确认 ArmDriver.get_current_joint_angles() 末尾是否返回夹爪角度G。")
 
+        self._capture_home_pose_after_connect()
         self.connection_changed.emit(True, port)
         self.log_msg.emit("机械臂连接成功")
+
+    def _capture_home_pose_after_connect(self):
+        """
+        Wait for the initial connection movement to settle, then save
+        the current J1~J6 position as the home position.
+
+        The gripper is not included.
+        """
+        self.home_target = None
+
+        self.log_msg.emit("等待连接后的初始动作完成，以保存初始位置...")
+
+        start_time = time.perf_counter()
+        stable_since = None
+        reference_q = None
+        samples = []
+
+        while time.perf_counter() - start_time < self.home_capture_timeout:
+
+            q = self._safe_get_angles()
+
+            if q is not None and len(q) >= ARM_DOF:
+                q6 = [float(x) for x in q[:ARM_DOF]]
+                now = time.perf_counter()
+
+                if reference_q is None:
+                    reference_q = q6
+                    stable_since = now
+                    samples = [q6]
+
+                else:
+                    max_change = max(abs(q6[i] - reference_q[i]) for i in range(ARM_DOF))
+
+                    if max_change <= self.home_capture_tolerance:
+                        samples.append(q6)
+
+                        if now - stable_since >= self.home_capture_stable_time:
+                            self.home_target = [sum(sample[i] for sample in samples) / len(samples) for i in range(ARM_DOF)]
+
+                            self.log_msg.emit(f"初始位置已保存：J1~J6 = " f"{[round(x, 4) for x in self.home_target]}")
+                            return True
+
+                    else:
+                        # The arm is still moving. Start measuring stability again.
+                        reference_q = q6
+                        stable_since = now
+                        samples = [q6]
+
+            time.sleep(0.1)
+
+        self.log_msg.emit("警告：等待初始动作稳定超时，未保存Home位置。" "请检查机械臂是否已经停止移动。")
+        return False
 
     def _disconnect(self, close_only: bool):
         """
@@ -468,58 +565,102 @@ class RobotWorker(QThread):
                 speeds.append(min(max(d / motion_time, self.home_speed_min), max_speed))
         return speeds, motion_time
 
+    def _move_arm_to_home(self, target):
+        """
+        Move only J1~J6 to the specified saved home position.
+        The gripper is never commanded.
+        """
+        if self.arm is None or not self.connected:
+            raise RuntimeError("机械臂未连接")
+
+        if not self.enabled:
+            raise RuntimeError("机械臂未使能")
+
+        target = [float(x) for x in list(target)[:ARM_DOF]]
+
+        if len(target) != ARM_DOF:
+            raise RuntimeError("Home目标必须包含J1~J6六个角度")
+
+        q_now = self._safe_get_angles()
+
+        if q_now is None or len(q_now) < ARM_DOF:
+            raise RuntimeError("无法读取当前J1~J6角度")
+
+        q6_now = [float(x) for x in q_now[:ARM_DOF]]
+
+        speeds, estimated_time = self._calc_sync_speeds_6dof(q6_now, target, self.home_speed)
+
+        self.log_msg.emit(f"返回Home：目标 J1~J6 = " f"{[round(x, 4) for x in target]}")
+
+        self.log_msg.emit(f"各关节速度 = {[round(v, 3) for v in speeds]}")
+
+        # Switch only J1~J6 into position/velocity mode.
+        self._ensure_mode("pos_vel")
+
+        # Send the initial movement command to J1~J6.
+        self._set_arm_joint_angles(target, v=speeds)
+
+        t0 = time.perf_counter()
+        deadline = t0 + min(self.home_timeout, max(estimated_time + 1.0, 1.0))
+
+        next_resend = t0 + self.home_resend_period
+        stable_count = 0
+        reached_target = False
+
+        while time.perf_counter() < deadline:
+
+            now = time.perf_counter()
+            q_check = self._safe_get_angles()
+
+            if q_check is not None and len(q_check) >= ARM_DOF:
+
+                err = max(abs(float(q_check[i]) - target[i]) for i in range(ARM_DOF))
+
+                self.angles_updated.emit(self._pad_q_to_match(q_check))
+
+                if err <= self.home_tolerance:
+                    stable_count += 1
+
+                    if stable_count >= 3:
+                        reached_target = True
+                        break
+
+                else:
+                    stable_count = 0
+
+            # Resend the target periodically if necessary.
+            if now >= next_resend:
+                self._set_arm_joint_angles(target, v=speeds)
+                next_resend = now + self.home_resend_period
+
+            time.sleep(0.02)
+
+        if not reached_target:
+            raise RuntimeError("返回Home超时：机械臂未能在规定时间内到达目标位置")
+
+        # Send the final target at a low speed to maintain the position.
+        self._set_arm_joint_angles(target, v=[self.home_speed_min] * ARM_DOF)
+
+        time.sleep(0.15)
+
     def _return_home_before_disable(self):
-        """断开/关闭前，先让J1~J6回到零位，再允许失能。夹爪不参与回零。"""
+        """
+        Before disconnecting, return J1~J6 to the saved home position.
+        The gripper is not included.
+        """
         if self.arm is None or not self.connected or not self.enabled:
             return
 
+        if self.home_target is None:
+            self.log_msg.emit("自动返回Home跳过：尚未保存初始位置。")
+            return
+
         try:
-            q_now = self._safe_get_angles()
-            if q_now is None or len(q_now) < ARM_DOF:
-                self.log_msg.emit("回零跳过：无法读取当前J1~J6角度")
-                return
+            self._move_arm_to_home(self.home_target)
+            self.log_msg.emit("J1~J6 已返回保存的Home位置，准备失能。")
 
-            q6_now = [float(x) for x in q_now[:ARM_DOF]]
-            target = list(self.home_target)
-            speeds, estimated_time = self._calc_sync_speeds_6dof(q6_now, target, self.home_speed)
-
-            self.log_msg.emit(
-                f"断开/关闭前自动回零：目标 J1~J6 = {[round(x, 3) for x in target]}，"
-                f"速度 = {[round(v, 3) for v in speeds]}"
-            )
-
-            self._ensure_mode("pos_vel")
-            self._set_arm_joint_angles(target, v=speeds)
-
-            t0 = time.perf_counter()
-            deadline = t0 + min(self.home_timeout, max(estimated_time + 1.0, 1.0))
-            next_resend = t0 + self.home_resend_period
-            stable_count = 0
-
-            while time.perf_counter() < deadline:
-                now = time.perf_counter()
-                q_check = self._safe_get_angles()
-                if q_check is not None and len(q_check) >= ARM_DOF:
-                    err = max(abs(float(q_check[i]) - target[i]) for i in range(ARM_DOF))
-                    self.angles_updated.emit(self._pad_q_to_match(q_check))
-                    if err <= self.home_tolerance:
-                        stable_count += 1
-                        if stable_count >= 3:
-                            break
-                    else:
-                        stable_count = 0
-
-                if now >= next_resend:
-                    self._set_arm_joint_angles(target, v=speeds)
-                    next_resend = now + self.home_resend_period
-
-                time.sleep(0.02)
-
-            self._set_arm_joint_angles(target, v=[self.home_speed_min] * ARM_DOF)
-            time.sleep(0.15)
-            self.log_msg.emit("J1~J6 已执行回零，准备失能。")
         except Exception as e:
-            self.log_msg.emit(f"回零失败，将继续失能断开: {e}")
+            self.log_msg.emit(f"自动返回Home失败，将继续失能断开: {e}")
 
     def _enable_arm_joints_once(self):
         """只启用 J1~J6；夹爪由 _enable_gripper_once 单独启用。"""

@@ -55,8 +55,10 @@ ZH_TO_EN = {
     "断开": "Disconnect",
     "断开中...": "Disconnecting...",
     "关闭中...": "Closing...",
-    "设置0点": "Set Zero",
-    "设置0点中...": "Setting zero...",
+    "设置0点": "Set 0",
+    "设置0点中...": "Setting 0...",
+    "回到初始位置": "Return to 0",
+    "返回初始位置中...": "Returning 0...",
     "使能": "Enable",
     "使能中...": "Enabling...",
     "失能": "Disable",
@@ -181,6 +183,7 @@ class DragTeachWindow(QMainWindow):
         self.arm_enabled = False
         self.is_toggling_enable = False
         self.enable_target_enabled = False
+        self.is_returning_home = False
 
         self.worker = RobotWorker()
         self.worker.log_msg.connect(self.log)
@@ -190,6 +193,7 @@ class DragTeachWindow(QMainWindow):
         self.worker.enable_state_changed.connect(self.on_enable_state_changed)
         self.worker.enable_toggle_finished.connect(self.on_enable_toggle_finished)
         self.worker.zero_set_finished.connect(self.on_zero_set_finished)
+        self.worker.home_return_finished.connect(self.on_home_return_finished)
 
         self.worker.record_status.connect(self.path_record_status_update)
         self.worker.record_finished.connect(self.on_path_record_finished)
@@ -278,6 +282,13 @@ class DragTeachWindow(QMainWindow):
         self.set_zero_btn.setMinimumWidth(90)
         self.set_zero_btn.setEnabled(False)
         layout.addWidget(self.set_zero_btn)
+
+        # Return to the saved connection pose
+        self.home_btn = QPushButton("回到初始位置")
+        self.home_btn.clicked.connect(self.return_to_home)
+        self.home_btn.setMinimumWidth(110)
+        self.home_btn.setEnabled(False)
+        layout.addWidget(self.home_btn)
 
         self.enable_btn = QPushButton("使能")
         self.enable_btn.clicked.connect(self.toggle_arm_enable)
@@ -712,6 +723,9 @@ class DragTeachWindow(QMainWindow):
         self.point_teach_status.setText(self.ui_status(self.point_teach_status_raw))
         self.point_play_status.setText(self.ui_status(self.point_play_status_raw))
 
+        if hasattr(self, "home_btn"):
+            self.home_btn.setText(self.ui("返回初始位置中...") if self.is_returning_home else self.ui("回到初始位置"))
+
     def warn(self, title_zh: str, message_zh: str):
         QMessageBox.warning(self, self.ui(title_zh), self.ui(message_zh))
 
@@ -775,6 +789,7 @@ class DragTeachWindow(QMainWindow):
             self.set_zero_btn.setEnabled(not self.is_setting_zero)
             self.enable_btn.setText(self.ui("失能"))
             self.enable_btn.setEnabled(True)
+            self.home_btn.setEnabled(self.arm_enabled)
         else:
             self.is_path_recording = False
             self.is_path_playing = False
@@ -793,6 +808,7 @@ class DragTeachWindow(QMainWindow):
             self.enable_btn.setText(self.ui("使能"))
             self.enable_btn.setEnabled(False)
             self.reset_all_buttons_after_stop()
+            self.home_btn.setEnabled(False)
 
     def is_any_running(self):
         return self.is_path_recording or self.is_path_playing or self.is_point_teaching or self.is_point_playing
@@ -825,6 +841,57 @@ class DragTeachWindow(QMainWindow):
         self.connect_btn.setEnabled(False)
         self.tabs.setEnabled(False)
         self.worker.request_set_zero()
+
+    def return_to_home(self):
+        if not self.is_connected:
+            self.warn("错误", "请先连接机械臂")
+            return
+
+        if not self.arm_enabled:
+            self.warn("错误", "请先使能机械臂")
+            return
+
+        if self.is_any_running():
+            self.warn("提示", "请先停止当前示教或播放任务")
+            return
+
+        if self.is_setting_zero or self.is_toggling_enable or self.is_returning_home:
+            return
+
+        self.is_returning_home = True
+
+        self.home_btn.setEnabled(False)
+        self.home_btn.setText(self.ui("返回初始位置中..."))
+
+        self.set_zero_btn.setEnabled(False)
+        self.enable_btn.setEnabled(False)
+        self.connect_btn.setEnabled(False)
+        self.tabs.setEnabled(False)
+
+        self.worker.request_return_home()
+
+    def on_home_return_finished(self, ok, message):
+        # Return Home operation has finished.
+        self.is_returning_home = False
+
+        # Restore the interface.
+        self.tabs.setEnabled(True)
+        self.connect_btn.setEnabled(True)
+
+        # Restore button labels and availability.
+        self.home_btn.setText(self.ui("回到初始位置"))
+        self.home_btn.setEnabled(self.is_connected and self.arm_enabled)
+
+        self.set_zero_btn.setText(self.ui("设置0点"))
+        self.set_zero_btn.setEnabled(self.is_connected and not self.is_setting_zero and not self.is_toggling_enable)
+
+        self.enable_btn.setEnabled(self.is_connected and not self.is_toggling_enable)
+
+        # Display an error only if the operation failed.
+        if not ok:
+            self.warn_text("机械臂错误", message)
+
+        self.log(message)
 
     def on_zero_set_finished(self, ok, message):
         self.is_setting_zero = False
