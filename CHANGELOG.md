@@ -26,6 +26,13 @@ EX:
 - PATCH Add logic to runsheet teaser delete to delete corresponding
   schedule cards.
 -->
+## Jaelynn - 11/6/2026 
+- Tested Trjectory Camera Recorder. Files from the recordings were added. 
+
+### Changed
+- Added a set to 0 into `main.py` so that robot can be reset to original position.
+
+---
 ## Jaelynn - 11/2/2026
 ### Changed
 - Modified `robot_worker.py` function `_drain_commands()` exception line, ```python except Exception as e:```, to revert back to display `connect` if port doesn't connect
