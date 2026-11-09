@@ -21,9 +21,13 @@ from PyQt5.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QGridLayout,
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QSpinBox,
     QTableWidget,
@@ -37,7 +41,7 @@ from PyQt5.QtWidgets import (
 from point_io import PointAction, read_point_program_csv, save_point_program_csv
 from robot_worker import RobotWorker
 from trajectory_io import save_trajectory_csv
-from camera import CameraWork
+from camera import CameraWork, check_camera_quietly
 
 ARM_DOF = 6
 TOTAL_DOF = 7
@@ -208,18 +212,30 @@ class DragTeachWindow(QMainWindow):
         self.worker.finished.connect(self.on_worker_thread_finished)
         self.worker.start()
 
-        # Camera reference recording for point teaching
+        # ==================== Camera state ====================
+
+        # One worker and one preview per active camera.
+        self.camera_workers = {}
+        self.camera_preview_labels = {}
+        self.latest_camera_images = {}
+
+        # Keep this for compatibility with existing single-camera code.
         self.latest_camera_image = None
+
+        # Point-teaching camera recording.
         self.point_recording_dir = None
         self.point_recording_csv = None
         self.point_recording_file = None
         self.point_recording_writer = None
         self.point_capture_count = 0
 
-        # Timer for capturing camera frames during continuous trajectory recording
+        # Continuous trajectory camera recording.
+        self.CT_session_dir = None
+        self.CT_camera_images_dir = None
+
         self.CT_camera_timer = QTimer(self)
         self.CT_camera_timer.timeout.connect(self.capture_CT_camera_frame)
-        self.CT_camera_interval = 200  # Capture every 200 ms (5 FPS)
+        self.CT_camera_interval = 250  # 4 FPS per active camera
         
         self.init_ui()
         self.scan_serial_ports() 
@@ -599,16 +615,27 @@ class DragTeachWindow(QMainWindow):
         tab = QWidget()
         layout = QVBoxLayout(tab)
 
-        group = QGroupBox("AI 物体与颜色检测器")
+        group = QGroupBox("AI Object and Color Detector")
         group_layout = QVBoxLayout(group)
 
-        # Camera selection controls
+        # ==================== Camera mode ====================
         camera_layout = QHBoxLayout()
 
-        camera_layout.addWidget(QLabel("Camera:"))
+        camera_layout.addWidget(QLabel("Camera mode:"))
 
+        self.camera_mode_selector = QComboBox()
+        self.camera_mode_selector.addItem("Single Camera", "single")
+        self.camera_mode_selector.addItem("Multiple Cameras", "multiple")
+        self.camera_mode_selector.currentIndexChanged.connect(self.on_camera_mode_changed)
+        camera_layout.addWidget(self.camera_mode_selector)
+
+        camera_layout.addSpacing(15)
+
+        camera_layout.addWidget(QLabel("Select camera:"))
+
+        # **NEW: Single-camera dropdown**
         self.camera_selector = QComboBox()
-        self.camera_selector.setMinimumWidth(200)
+        self.camera_selector.setMinimumWidth(150)
         camera_layout.addWidget(self.camera_selector)
 
         self.refresh_camera_btn = QPushButton("Refresh Cameras")
@@ -618,23 +645,38 @@ class DragTeachWindow(QMainWindow):
         camera_layout.addStretch()
         group_layout.addLayout(camera_layout)
 
-        # Camera preview
-        self.camera_feed_label = QLabel("关闭摄像头")
-        self.camera_feed_label.setAlignment(Qt.AlignCenter)
-        self.camera_feed_label.setStyleSheet("background-color: black; color: white;")
-        self.camera_feed_label.setMinimumSize(640, 480)
-        group_layout.addWidget(self.camera_feed_label)
+        # ==================== Multiple-camera selection ====================
 
-        # Camera on/off button
-        self.toggle_camera_btn = QPushButton("打开摄像头")
+        self.camera_multi_selector = QListWidget()
+        self.camera_multi_selector.setSelectionMode(QListWidget.MultiSelection)
+        self.camera_multi_selector.setMaximumHeight(90)
+
+        group_layout.addWidget(self.camera_multi_selector)
+
+        # ==================== Camera preview ====================
+
+        self.camera_preview_container = QWidget()
+        self.camera_preview_layout = QGridLayout(self.camera_preview_container)
+
+        self.camera_preview_scroll = QScrollArea()
+        self.camera_preview_scroll.setWidgetResizable(True)
+        self.camera_preview_scroll.setWidget(self.camera_preview_container)
+
+        # **The preview now gets the majority of the available space.**
+        group_layout.addWidget(self.camera_preview_scroll, 1)
+
+        # ==================== Start/stop cameras ====================
+
+        self.toggle_camera_btn = QPushButton("Open Camera(s)")
         self.toggle_camera_btn.setMinimumHeight(40)
         self.toggle_camera_btn.clicked.connect(self.toggle_camera_detector)
+
         group_layout.addWidget(self.toggle_camera_btn)
 
-        layout.addWidget(group)
+        layout.addWidget(group, 1)
 
-        # Scan cameras when the tab is created
         self.scan_cameras()
+        self.on_camera_mode_changed()
 
         return tab
     # ==================== 基础功能 ====================
@@ -1047,8 +1089,18 @@ class DragTeachWindow(QMainWindow):
 
     def on_path_record_finished(self, rows):
         count = len(rows)
+
         if count > 0:
-            filepath = self.build_path_save_filepath()
+            session_dir = self.CT_session_dir or self.get_default_path()
+            filename = self.path_filename_edit.text().strip()
+
+            if not filename:
+                filename = f"trajectory_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            if not filename.lower().endswith(".csv"):
+                filename += ".csv"
+
+            filepath = os.path.join(session_dir, filename)
+
             try:
                 save_trajectory_csv(filepath, rows)
                 self.log(f"连续轨迹已保存: {filepath}")
@@ -1144,7 +1196,6 @@ class DragTeachWindow(QMainWindow):
 
         if not self.is_point_teaching:
             self.start_point_camera_recording()
-            self.worker.request_start_point_teach(self.point_gravity_hz_spin.value())
             self.is_point_teaching = True
             self.point_teach_btn.setText(self.ui("停止点位示教/保持当前位置"))
             self.point_teach_status_update("状态: 准备中...")
@@ -1417,56 +1468,236 @@ class DragTeachWindow(QMainWindow):
         self.highlight_point_row(-1)
 
     # ==================== 相机检测器 ====================
-    
-    def toggle_camera_detector(self):
-        if not hasattr(self, 'camera_worker') or not self.camera_worker.isRunning():
+
+    def on_camera_mode_changed(self):
+        """Switch between single-camera dropdown and multiple-camera list."""
+
+        if self.camera_workers:
+            return
+
+        single_mode = self.camera_mode_selector.currentData() == "single"
+
+        # Show the dropdown for single-camera mode.
+        self.camera_selector.setVisible(single_mode)
+
+        # Show the selection list for multiple-camera mode.
+        self.camera_multi_selector.setVisible(not single_mode)
+
+    def get_selected_camera_indices(self):
+        """Return selected camera indices based on the current mode."""
+
+        if self.camera_mode_selector.currentData() == "single":
+
+            # Get the selected camera from the dropdown.
             camera_index = self.camera_selector.currentData()
 
             if camera_index is None:
-                self.warn("错误", "没有检测到可用摄像头")
-                return
-            
-            self.camera_worker = CameraWork(camera_index=camera_index)
-            self.camera_worker.frame_ready.connect(self.update_camera_frame)
-            self.camera_worker.log_msg.connect(self.log)
-            self.camera_worker.finished.connect(self.on_camera_finished)
+                return []
 
-            self.camera_worker.start()
-
-            self.camera_selector.setEnabled(False)
-            self.refresh_camera_btn.setEnabled(False)
-
-            self.toggle_camera_btn.setText(self.ui("关闭摄像头"))
-            self.log(self.ui("开启摄像头检测"))
+            return [int(camera_index)]
 
         else:
-            try:
-                self.camera_worker.stop()
 
-                self.toggle_camera_btn.setText(self.ui("打开摄像头"))
-                self.camera_feed_label.setText(self.ui("关闭摄像头"))
-                self.camera_feed_label.setPixmap(QPixmap())
+            # Get all selected cameras from the multiple-camera list.
+            return [int(item.data(Qt.UserRole)) for item in self.camera_multi_selector.selectedItems()]
 
-                self.camera_selector.setEnabled(True)
-                self.refresh_camera_btn.setEnabled(True)
+    def toggle_camera_detector(self):
+        # If cameras are already running, stop all of them.
+        if self.camera_workers:
+            self.stop_all_cameras()
+            return
 
-                self.log(self.ui("关闭摄像头"))
+        camera_indices = self.get_selected_camera_indices()
 
-            except Exception:
-                import traceback
-                print("[CAMERA DEBUG ERROR]", flush=True)
-                traceback.print_exc()            
+        if not camera_indices:
+            self.warn("错误", "请选择至少一个摄像头")
+            return
 
-    def update_camera_frame(self, qt_image):
-        # Keep the latest image for point-by-point snapshots.
-        self.latest_camera_image = qt_image.copy()
+        # Single-camera mode should only start one camera.
+        if self.camera_mode_selector.currentData() == "single":
+            camera_indices = camera_indices[:1]
 
-        # Continue displaying the camera feed.
-        self.camera_feed_label.setPixmap(QPixmap.fromImage(qt_image).scaled(self.camera_feed_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        self.camera_mode_selector.setEnabled(False)
+        self.camera_selector.setEnabled(False)
+        self.camera_multi_selector.setEnabled(False)
+        self.refresh_camera_btn.setEnabled(False)
+
+        self.clear_camera_previews()
+
+        for camera_index in camera_indices:
+            self.start_camera_worker(camera_index)
+
+        self.toggle_camera_btn.setText("Close Camera(s)")
+
+    def start_camera_worker(self, camera_index):
+        """Create and start one independent worker for a camera."""
+
+        try:
+            worker = CameraWork(camera_index=camera_index)
+
+            worker.frame_ready.connect(lambda image, index=camera_index: self.update_camera_frame(index, image))
+
+            worker.log_msg.connect(self.log)
+
+            worker.finished.connect(lambda index=camera_index: self.on_camera_finished(index))
+
+            self.camera_workers[camera_index] = worker
+            self.latest_camera_images[camera_index] = None
+
+            # Create a separate preview for this camera.
+            preview = QLabel(f"Camera {camera_index}: Waiting for image...")
+            preview.setAlignment(Qt.AlignCenter)
+            preview.setStyleSheet("background-color: black; color: white;")
+
+            # **NEW: Larger preview in single-camera mode.**
+            if self.camera_mode_selector.currentData() == "single":
+                preview.setMinimumSize(640, 480)
+                preview.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+                column_count = 1
+
+            else:
+                preview.setMinimumSize(320, 240)
+                preview.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+                column_count = 2
+
+            self.camera_preview_labels[camera_index] = preview
+
+            # Arrange previews based on the selected mode.
+            position = len(self.camera_preview_labels) - 1
+            row = position // column_count
+            column = position % column_count
+
+            self.camera_preview_layout.addWidget(preview, row, column)
+
+            worker.start()
+
+            self.log(f"Started camera {camera_index}")
+
+        except Exception as e:
+            self.log(f"Failed to start camera {camera_index}: {e}")
+
+    def update_camera_frame(self, camera_index, qt_image):
+        """Update the latest frame and the corresponding preview."""
+
+        self.latest_camera_images[camera_index] = qt_image.copy()
+
+        # Preserve compatibility with existing single-camera references.
+        if self.latest_camera_image is None or camera_index == min(self.latest_camera_images):
+            self.latest_camera_image = qt_image.copy()
+
+        preview = self.camera_preview_labels.get(camera_index)
+
+        if preview is not None:
+            preview.setPixmap(QPixmap.fromImage(qt_image).scaled(preview.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+
+    def on_camera_finished(self, camera_index):
+        """Handle a camera worker that has finished."""
+
+        worker = self.camera_workers.get(camera_index)
+
+        if worker is not None and not worker.isRunning():
+            self.camera_workers.pop(camera_index, None)
+
+        self.latest_camera_images.pop(camera_index, None)
+        self.camera_preview_labels.pop(camera_index, None)
+
+        if not self.camera_workers:
+            self.latest_camera_image = None
+
+            self.camera_mode_selector.setEnabled(True)
+            self.camera_selector.setEnabled(True)
+            self.refresh_camera_btn.setEnabled(True)
+            self.camera_multi_selector.setEnabled(True)
+            self.toggle_camera_btn.setText("Open Camera(s)")
+
+            self.log("All cameras stopped.")
+
+    def stop_all_cameras(self):
+        """Stop every active camera worker."""
+
+        workers = list(self.camera_workers.items())
+
+        for camera_index, worker in workers:
+            worker.stop()
+
+            if worker.isRunning():
+                worker.wait()
+
+            self.camera_workers.pop(camera_index, None)
+
+        self.latest_camera_images.clear()
+        self.latest_camera_image = None
+
+        self.clear_camera_previews()
+
+        self.camera_mode_selector.setEnabled(True)
+        self.camera_selector.setEnabled(True)
+        self.camera_multi_selector.setEnabled(True)
+        self.refresh_camera_btn.setEnabled(True)
+
+        self.toggle_camera_btn.setText("Open Camera(s)")
+
+        self.log("All cameras stopped.")
+
+    def clear_camera_previews(self):
+        """Remove all camera preview widgets."""
+
+        while self.camera_preview_layout.count():
+            item = self.camera_preview_layout.takeAt(0)
+            widget = item.widget()
+
+            if widget is not None:
+                widget.deleteLater()
+
+        self.camera_preview_labels.clear()
+
+    def scan_cameras(self):
+        """Detect available camera indices."""
+
+        if self.camera_workers:
+            self.log("Stop all cameras before refreshing the camera list.")
+            return
+
+        # Clear previous camera selections.
+        self.camera_selector.clear()
+        self.camera_multi_selector.clear()
+
+        available_cameras = []
+
+        for index in range(10):
+            if check_camera_quietly(index):
+                available_cameras.append(index)
+
+        # Populate both selection controls.
+        for index in available_cameras:
+
+            # Single-camera dropdown.
+            self.camera_selector.addItem(f"Camera {index}", index)
+
+            # Multiple-camera list.
+            item = QListWidgetItem(f"Camera {index}")
+            item.setData(Qt.UserRole, index)
+            self.camera_multi_selector.addItem(item)
+
+        # Automatically select the first camera.
+        if self.camera_selector.count() > 0:
+            self.camera_selector.setCurrentIndex(0)
+
+        if self.camera_multi_selector.count() > 0:
+            self.camera_multi_selector.item(0).setSelected(True)
+
+        self.on_camera_mode_changed()
+
+        if not available_cameras:
+            self.log("No available cameras detected.")
+        else:
+            self.log(f"Detected cameras: {available_cameras}")
 
     def start_point_camera_recording(self):
-        """Create a folder for camera references captured during teaching."""
+        """Create a point-teaching session for all active cameras."""
+
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
         session_dir = os.path.join(self.get_default_path(), f"point_session_{timestamp}")
         os.makedirs(session_dir, exist_ok=True)
 
@@ -1477,192 +1708,142 @@ class DragTeachWindow(QMainWindow):
 
         self.point_recording_writer = csv.writer(self.point_recording_file)
 
-        self.point_recording_writer.writerow(["point_number", "timestamp", "image_file", "J1", "J2", "J3", "J4", "J5", "J6", "G"])
+        self.point_recording_writer.writerow(["point_number", "timestamp", "camera_index", "image_file", "J1", "J2", "J3", "J4", "J5", "J6", "G"])
 
         self.point_capture_count = 0
 
-        self.log(f"Camera reference recording folder: {session_dir}")
+        # Create a separate image folder for every active camera.
+        for camera_index in self.camera_workers:
+            os.makedirs(os.path.join(session_dir, f"camera_{camera_index}"), exist_ok=True)
+
+        self.log(f"Point camera recording folder: {session_dir}")
 
     def save_point_camera_reference(self, q):
-        """Save a snapshot and associate it with a captured robot pose."""
+        """Save one snapshot from every active camera for a captured point."""
+
         if self.point_recording_writer is None:
             return
 
-        if self.latest_camera_image is None:
-            self.log("No camera frame available; no snapshot saved for this point.")
+        if not self.latest_camera_images:
+            self.log("No camera frames available for this point.")
             return
 
         self.point_capture_count += 1
         point_number = self.point_capture_count
 
-        filename = f"point_{point_number:03d}.png"
-        filepath = os.path.join(self.point_recording_dir, filename)
-
-        if not self.latest_camera_image.save(filepath, "PNG"):
-            self.log(f"Failed to save camera snapshot: {filepath}")
-            return
-
         timestamp = datetime.now().isoformat(timespec="milliseconds")
+
         angles = list(q[:7])
 
         while len(angles) < 7:
             angles.append("")
 
-        self.point_recording_writer.writerow([point_number, timestamp, filename, *angles])
+        saved_count = 0
+
+        for camera_index, qt_image in list(self.latest_camera_images.items()):
+            if qt_image is None:
+                continue
+
+            camera_folder = os.path.join(self.point_recording_dir, f"camera_{camera_index}")
+
+            os.makedirs(camera_folder, exist_ok=True)
+
+            filename = f"point_{point_number:03d}.png"
+            image_path = os.path.join(camera_folder, filename)
+
+            if not qt_image.save(image_path, "PNG"):
+                self.log(f"Failed to save camera {camera_index}: {image_path}")
+                continue
+
+            # Store a relative path so the session folder can be moved.
+            relative_path = os.path.relpath(image_path, self.point_recording_dir)
+
+            self.point_recording_writer.writerow([point_number, timestamp, camera_index, relative_path, *angles])
+
+            saved_count += 1
+
         self.point_recording_file.flush()
 
-        self.log(f"Saved camera reference for point {point_number}: {filename}")
-
-    def stop_point_camera_recording(self):
-        """Close the session metadata file."""
-        if self.point_recording_file is not None:
-            self.point_recording_file.close()
-
-        self.point_recording_file = None
-        self.point_recording_writer = None
-
-        if self.point_recording_dir:
-            self.log(f"Camera reference recording saved: {self.point_recording_dir}")
+        self.log(f"Saved point {point_number} from {saved_count} camera(s).")
 
     def start_CT_camera_recording(self):
-        """Create a folder and start camera recording during trajectory teaching."""
+        """Start recording frames from every active camera."""
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         session_dir = os.path.join(self.get_default_path(), f"trajectory_session_{timestamp}")
+        os.makedirs(session_dir, exist_ok=True)
 
+        self.CT_session_dir = session_dir
         self.point_recording_dir = session_dir
-        self.CT_camera_images_dir = os.path.join(session_dir, "camera_images")
 
+        self.CT_camera_images_dir = os.path.join(session_dir, "camera_images")
         os.makedirs(self.CT_camera_images_dir, exist_ok=True)
+
+        # Create a folder for each active camera.
+        for camera_index in self.camera_workers:
+            os.makedirs(os.path.join(self.CT_camera_images_dir, f"camera_{camera_index}"), exist_ok=True)
 
         self.point_recording_csv = os.path.join(session_dir, "camera_references.csv")
 
-        self.point_recording_file = open(self.point_recording_csv, "w", newline="", encoding="utf-8")
+        self.point_recording_file = open(self.point_recording_csv, "w",newline="", encoding="utf-8")
 
         self.point_recording_writer = csv.writer(self.point_recording_file)
 
-        self.point_recording_writer.writerow(["elapsed_time_s", "image_file"])
+        self.point_recording_writer.writerow(["elapsed_time_s", "camera_index", "image_file"])
 
-        self.point_capture_count = 0
+        # Each camera has its own frame counter.
+        self.CT_camera_frame_counts = {camera_index: 0 for camera_index in self.camera_workers}
 
-        # Start camera recording timer
         self.CT_camera_start_time = time.perf_counter()
+
         self.CT_camera_timer.start(self.CT_camera_interval)
 
         self.log(f"Camera recording folder: {session_dir}")
 
-    def save_CT_reference(self):
-        """Save a snapshot and associate it with a captured robot pose."""
-        if self.point_recording_writer is None:
-            return
-
-        if self.latest_camera_image is None:
-            self.log("No camera frame available; no snapshot saved for this point.")
-            return
-
-        self.point_capture_count += 1
-        point_number = self.point_capture_count
-
-        filename = f"point_{point_number:03d}.png"
-        filepath = os.path.join(self.point_recording_dir, filename)
-
-        if not self.latest_camera_image.save(filepath, "PNG"):
-            self.log(f"Failed to save camera snapshot: {filepath}")
-            return
-
-        timestamp = datetime.now().isoformat(timespec="milliseconds")
-
-        self.point_recording_writer.writerow([point_number, timestamp, filename])
-        self.point_recording_file.flush()
-
-        self.log(f"Saved camera reference for point {point_number}: {filename}")
-
     def capture_CT_camera_frame(self):
-        """Capture and save the latest camera frame during trajectory recording."""
-        
+        """Save the latest frame from every active camera."""
+
         if self.point_recording_writer is None:
             return
 
-        if self.latest_camera_image is None:
-            return
+        elapsed_time = (time.perf_counter() - self.CT_camera_start_time)
 
-        self.point_capture_count += 1
+        saved_count = 0
 
-        filename = f"frame_{self.point_capture_count:06d}.png"
-        image_path = os.path.join(self.CT_camera_images_dir, filename)
+        for camera_index, qt_image in list(self.latest_camera_images.items()):
+            if qt_image is None:
+                continue
 
-        # Save the latest camera frame
-        if not self.latest_camera_image.save(image_path, "PNG"):
-            self.log(f"Failed to save camera frame: {image_path}")
-            return
+            camera_folder = os.path.join(self.CT_camera_images_dir, f"camera_{camera_index}")
+            os.makedirs(camera_folder, exist_ok=True)
 
-        # Record elapsed time and image filename
-        elapsed_time = time.perf_counter() - self.CT_camera_start_time
+            frame_count = (self.CT_camera_frame_counts.get(camera_index, 0) + 1)
 
-        self.point_recording_writer.writerow([elapsed_time, filename])
+            filename = f"frame_{frame_count:06d}.png"
+            image_path = os.path.join(camera_folder, filename)
 
-        self.point_recording_file.flush()
+            if not qt_image.save(image_path, "PNG"):
+                self.log(f"Failed to save camera {camera_index}: {image_path}")
+                continue
 
-    def stop_CT_camera_recording(self):
-        """Stop camera recording and close the reference file."""
+            self.CT_camera_frame_counts[camera_index] = frame_count
 
-        self.CT_camera_timer.stop()
+            relative_path = os.path.relpath(image_path, self.CT_session_dir)
 
-        if self.point_recording_file is not None:
-            self.point_recording_file.close()
+            self.point_recording_writer.writerow([f"{elapsed_time:.4f}", camera_index, relative_path])
 
-        self.point_recording_file = None
-        self.point_recording_writer = None
+            saved_count += 1
 
-        self.log("Camera recording stopped.")
-
-    def scan_cameras(self):
-        # Don't scan while a camera is already running
-        if hasattr(self, 'camera_worker'):
-            if self.camera_worker.isRunning():
-                return
-
-        self.camera_selector.clear()
-
-        available_cameras = []
-
-        # Check camera indices 0-9
-        for index in range(10):
-            if check_camera_quietly(index):
-                available_cameras.append(index)
-
-        # Populate dropdown
-        for index in available_cameras:
-            self.camera_selector.addItem(
-                f"Camera {index}",
-                index
-            )
-
-        if not available_cameras:
-            self.camera_selector.addItem("No cameras detected", None)
-            self.log("No available cameras detected.")
-        else:
-            self.log(f"Detected cameras: {available_cameras}")
-
-    def on_camera_finished(self):
-        self.toggle_camera_btn.setText(self.ui("打开摄像头"))
-
-        self.camera_selector.setEnabled(True)
-        self.refresh_camera_btn.setEnabled(True)
-
-        self.camera_feed_label.setPixmap(QPixmap())
-        self.camera_feed_label.setText(self.ui("关闭摄像头"))
+        if saved_count:
+            self.point_recording_file.flush()
 
     # ==================== 公共回调 ====================
     def on_angles_updated(self, q):
         if len(q) < ARM_DOF:
             return
         g_text = f"  G: {q[6]:.4f}" if len(q) >= TOTAL_DOF else "  G: 无反馈"
-        self.angle_text.setText(
-            f"J1: {q[0]:.4f}  J2: {q[1]:.4f}  J3: {q[2]:.4f}  "
-            f"J4: {q[3]:.4f}  J5: {q[4]:.4f}  J6: {q[5]:.4f}" + g_text
-        )
+        self.angle_text.setText(f"J1: {q[0]:.4f}  J2: {q[1]:.4f}  J3: {q[2]:.4f}  " f"J4: {q[3]:.4f}  J5: {q[4]:.4f}  J6: {q[5]:.4f}" + g_text)
 
     def on_worker_error(self, text):
         self.warn_text("机械臂错误", text)
@@ -1710,6 +1891,7 @@ class DragTeachWindow(QMainWindow):
         self.set_zero_btn.setEnabled(False)
         self.enable_btn.setEnabled(False)
         self.tabs.setEnabled(False)
+        self.stop_all_cameras()
         self.worker.request_shutdown()
 
     def on_worker_thread_finished(self):
@@ -1756,30 +1938,6 @@ def main():
     window.show()
 
     sys.exit(app.exec_())
-
-def check_camera_quietly(index):
-    """Check whether a camera works without printing OpenCV warnings."""
-    old_stderr = os.dup(2)
-    cap = None
-
-    try:
-        with open(os.devnull, "w") as devnull:
-            os.dup2(devnull.fileno(), 2)
-
-            cap = cv2.VideoCapture(index, cv2.CAP_MSMF)
-
-            if cap.isOpened():
-                ret, frame = cap.read()
-                return ret
-
-            return False
-
-    finally:
-        if cap is not None:
-            cap.release()
-
-        os.dup2(old_stderr, 2)
-        os.close(old_stderr)
 
 if __name__ == "__main__":
     main()

@@ -402,13 +402,6 @@ class RobotController:
         else:
             v_list = list(v)
         for i, joint in enumerate(self.joints):
-            if i == 0: # CHAT ADDED TEST
-                print(
-                    f"[J1 COMMAND] "
-                    f"ID=0x{joint.SlaveID:02X}, "
-                    f"Position={q[i]:.4f}, "
-                    f"Velocity={v_list[i]:.4f}"
-                )
             self.RobotCtrl.control_Pos_Vel(joint, q[i], v_list[i])
             
     

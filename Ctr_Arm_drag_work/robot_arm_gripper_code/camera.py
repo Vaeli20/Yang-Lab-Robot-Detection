@@ -110,3 +110,18 @@ class CameraWork(QThread):
         self.running = False
         if self.isRunning():
             self.wait(2000)
+
+def check_camera_quietly(index):
+    """Check whether a camera index can be opened."""
+
+    cap = cv2.VideoCapture(index, cv2.CAP_MSMF)
+
+    available = cap.isOpened()
+
+    if available:
+        ret, _ = cap.read()
+        available = ret
+
+    cap.release()
+
+    return available

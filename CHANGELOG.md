@@ -26,6 +26,11 @@ EX:
 - PATCH Add logic to runsheet teaser delete to delete corresponding
   schedule cards.
 -->
+## Jaelynn - 11/9/2026 
+
+### Changed
+- `main.py` had a change in how trajectory recording saves files, along with now having the ability to be able to use multiple <br>cameras at once **NEEDS TO BE TESTED**
+---
 ## Jaelynn - 11/6/2026 
 - Tested Trjectory Camera Recorder. Files from the recordings were added. 
 
