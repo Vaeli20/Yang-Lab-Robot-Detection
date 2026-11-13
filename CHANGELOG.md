@@ -26,10 +26,20 @@ EX:
 - PATCH Add logic to runsheet teaser delete to delete corresponding
   schedule cards.
 -->
+## Jaelynn - 11/13/2026
+### Changed
+- `main.py`: Added stop camera recording functions as they were missing.
+- `camera.py`: Changed lines 53, and 117 from using `CAP_MSMF` to `CAP_DSHOW` also made the function <br> `check_camera_quietly` to use error handling
+
+### Added
+- `Trajectory Points\RobotTrajectories` new trajectory recordings added during camera testing.
+
+---
 ## Jaelynn - 11/9/2026 
 
 ### Changed
-- `main.py` had a change in how trajectory recording saves files, along with now having the ability to be able to use multiple <br>cameras at once **NEEDS TO BE TESTED**
+- `main.py` had a change in how trajectory recording saves files, along with now having the ability to be able to use multiple <br>cdcameras at once **NEEDS TO BE TESTED**
+
 ---
 ## Jaelynn - 11/6/2026 
 - Tested Trjectory Camera Recorder. Files from the recordings were added. 

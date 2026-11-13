@@ -1718,6 +1718,21 @@ class DragTeachWindow(QMainWindow):
 
         self.log(f"Point camera recording folder: {session_dir}")
 
+    def stop_point_camera_recording(self):
+            """Flush and close the point-teaching camera reference CSV safely."""
+
+            recording_file = self.point_recording_file
+            try:
+                if recording_file is not None and not recording_file.closed:
+                    recording_file.flush()
+                    recording_file.close()
+            except Exception as e:
+                self.log(f"Error closing point camera recording: {e}")
+            finally:
+                self.point_recording_file = None
+                self.point_recording_writer = None
+                self.log("Point camera recording stopped.")
+
     def save_point_camera_reference(self, q):
         """Save one snapshot from every active camera for a captured point."""
 
@@ -1801,6 +1816,25 @@ class DragTeachWindow(QMainWindow):
 
         self.log(f"Camera recording folder: {session_dir}")
 
+    def stop_CT_camera_recording(self):
+        """Stop trajectory frame capture and close its CSV safely."""
+
+        if self.CT_camera_timer.isActive():
+            self.CT_camera_timer.stop()
+
+        recording_file = self.point_recording_file
+        try:
+            if recording_file is not None and not recording_file.closed:
+                recording_file.flush()
+                recording_file.close()
+        except Exception as e:
+            self.log(f"Error closing trajectory camera recording: {e}")
+        finally:
+            self.point_recording_file = None
+            self.point_recording_writer = None
+            self.CT_camera_frame_counts = {}
+            self.log("Trajectory camera recording stopped.")
+    
     def capture_CT_camera_frame(self):
         """Save the latest frame from every active camera."""
 

@@ -50,7 +50,7 @@ class CameraWork(QThread):
             detector = Detector(model_name=model_name, conf=conf_th, iou=iou_th, imgsz=self.cfg['imgsz'])
             motion = MotionDetector(history=motion_history, area_threshold=motion_area_threshold)
             
-            cap = cv2.VideoCapture(self.camera_index, cv2.CAP_MSMF)
+            cap = cv2.VideoCapture(self.camera_index, cv2.CAP_DSHOW)
             if not cap.isOpened():
                 self.log_msg.emit("ERROR: Could not open camera.")
                 return
@@ -114,14 +114,15 @@ class CameraWork(QThread):
 def check_camera_quietly(index):
     """Check whether a camera index can be opened."""
 
-    cap = cv2.VideoCapture(index, cv2.CAP_MSMF)
+    cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
 
-    available = cap.isOpened()
+    try:
+        if not cap.isOpened():
+            return False
 
-    if available:
-        ret, _ = cap.read()
-        available = ret
+        ret, frame = cap.read()
 
-    cap.release()
+        return ret and frame is not None
 
-    return available
+    finally:
+        cap.release()
